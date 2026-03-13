@@ -163,6 +163,13 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.delete("/api/chapters/:id", (req, res) => {
+    const id = req.params.id;
+    db.prepare("DELETE FROM token_logs WHERE chapter_id = ?").run(id);
+    db.prepare("DELETE FROM chapters WHERE id = ?").run(id);
+    res.json({ success: true });
+  });
+
   // Stats API
   app.get("/api/stats/tokens", (req, res) => {
     const totalTokens = db.prepare("SELECT SUM(tokens) as total FROM token_logs").get();

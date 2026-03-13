@@ -17,7 +17,8 @@ import {
   Languages,
   Trash2,
   X,
-  Layers
+  Layers,
+  Square
 } from "lucide-react";
 import { 
   LineChart, 
@@ -37,7 +38,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
 import { cn } from "./lib/utils";
 import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout } from "./types";
-import { generateAIContent, generateAIOutline } from "./services/aiService";
+import { generateAIContent, generateAIOutline, generateAIContentStream } from "./services/aiService";
 import { translations, Language } from "./constants";
 
 // --- Components ---
@@ -93,8 +94,7 @@ const StatCard = ({ label, value, icon: Icon, trend, t }: any) => (
 // --- Main App ---
 
 export default function App() {
-  const [lang, setLang] = useState<Language>("zh");
-  const t = translations[lang];
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   const [activeTab, setActiveTab] = useState("dashboard");
   const [novels, setNovels] = useState<Novel[]>([]);
@@ -108,6 +108,7 @@ export default function App() {
   const [isSegmenting, setIsSegmenting] = useState(false);
   const [segmentProgress, setSegmentProgress] = useState(0);
   const [isGeneratingOutline, setIsGeneratingOutline] = useState(false);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
@@ -115,11 +116,21 @@ export default function App() {
   const [batchCount, setBatchCount] = useState(3);
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
   const [novelToDelete, setNovelToDelete] = useState<number | null>(null);
+  const [chapterToDelete, setChapterToDelete] = useState<number | null>(null);
   const [newNovelTitle, setNewNovelTitle] = useState("");
   const [newNovelGenre, setNewNovelGenre] = useState("");
 
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+
+  useEffect(() => {
+    if ((isGenerating || isSegmenting || isBatchGenerating) && textareaRef.current) {
+      const textarea = textareaRef.current;
+      requestAnimationFrame(() => {
+        textarea.scrollTop = textarea.scrollHeight;
+      });
+    }
+  }, [currentChapter?.content, isGenerating, isSegmenting, isBatchGenerating]);
 
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
     const saved = localStorage.getItem("inkflow_ai_config");
@@ -147,6 +158,9 @@ export default function App() {
       layout: 'standard',
     };
   });
+
+  const [lang, setLang] = useState<Language>('zh');
+  const t = translations[lang];
 
   useEffect(() => {
     localStorage.setItem("inkflow_ai_config", JSON.stringify(aiConfig));
@@ -333,6 +347,8 @@ export default function App() {
 
   const handleAIWrite = async () => {
     if (!currentChapter || !selectedNovel) return;
+    const controller = new AbortController();
+    setAbortController(controller);
     setIsGenerating(true);
     try {
       const activeOutlineContent = selectedNovel.outlines?.find(o => o.is_active === 1)?.content || "";
@@ -343,33 +359,45 @@ export default function App() {
       const prompt = `${layoutContext}\n\nContinue writing the chapter titled "${currentChapter.title}". The current content is: ${currentContent.slice(-800)}`;
       const context = `Novel Title: ${selectedNovel.title}\nOutline: ${activeOutlineContent}`;
       
-      const result = await generateAIContent(prompt, context, aiConfig, writingConfig, lang);
+      let streamedText = "";
+      const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal);
       
-      const newContent = currentContent + (currentContent ? "\n\n" : "") + result.text;
+      for await (const chunk of stream) {
+        if (controller.signal.aborted) break;
+        streamedText += chunk;
+        // Update locally in real-time
+        setCurrentChapter(prev => prev ? { ...prev, content: currentContent + (currentContent ? "\n\n" : "") + streamedText } : null);
+      }
       
-      // Update locally
-      setCurrentChapter({ ...currentChapter, content: newContent });
+      const finalContent = currentContent + (currentContent ? "\n\n" : "") + streamedText;
       
       // Update on server with token usage
       await fetch(`/api/chapters/${currentChapter.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          content: newContent,
-          token_usage: Math.round(result.tokens)
+          content: finalContent,
+          token_usage: Math.round(streamedText.length / 4)
         }),
       });
       
       fetchStats();
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Generation aborted');
+      } else {
+        console.error(error);
+      }
     } finally {
       setIsGenerating(false);
+      setAbortController(null);
     }
   };
 
   const handleSegmentedWrite = async () => {
     if (!currentChapter || !selectedNovel) return;
+    const controller = new AbortController();
+    setAbortController(controller);
     setIsSegmenting(true);
     setSegmentProgress(0);
     
@@ -381,6 +409,7 @@ export default function App() {
       // We'll do up to 3 segments to try and reach the target
       const segments = 3;
       for (let i = 0; i < segments; i++) {
+        if (controller.signal.aborted) break;
         setSegmentProgress(Math.round(((i) / segments) * 100));
         
         const layoutContext = `STRICT LAYOUT: Use the ${writingConfig.layout} style. For web novels, this means MAX 2 sentences per paragraph.`;
@@ -390,13 +419,18 @@ export default function App() {
         Previous context for flow: ${currentContent.slice(-1000)}`;
         const context = `Novel Title: ${selectedNovel.title}\nOutline: ${activeOutlineContent}`;
         
-        const result = await generateAIContent(prompt, context, aiConfig, writingConfig, lang);
+        let streamedText = "";
+        const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal);
         
-        currentContent += (currentContent ? "\n\n" : "") + result.text;
-        totalTokens += result.tokens;
+        for await (const chunk of stream) {
+          if (controller.signal.aborted) break;
+          streamedText += chunk;
+          // Update locally
+          setCurrentChapter(prev => prev ? { ...prev, content: currentContent + (currentContent ? "\n\n" : "") + streamedText } : null);
+        }
         
-        // Update locally after each segment for feedback
-        setCurrentChapter(prev => prev ? { ...prev, content: currentContent } : null);
+        currentContent += (currentContent ? "\n\n" : "") + streamedText;
+        totalTokens += streamedText.length / 4;
         
         // If we already reached a decent length, we can stop early if it's not the last segment
         if (currentContent.length > writingConfig.maxWords * 0.8 && i < segments - 1) {
@@ -416,11 +450,16 @@ export default function App() {
         }),
       });
       fetchStats();
-    } catch (error) {
-      console.error("Segmented Write Error:", error);
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Segmented write aborted');
+      } else {
+        console.error("Segmented Write Error:", error);
+      }
     } finally {
       setIsSegmenting(false);
       setSegmentProgress(0);
+      setAbortController(null);
     }
   };
 
@@ -463,55 +502,110 @@ export default function App() {
     return data.id;
   };
 
+  const handleDeleteChapter = async (e: React.MouseEvent, chapterId: number) => {
+    e.stopPropagation();
+    setChapterToDelete(chapterId);
+  };
+
+  const confirmDeleteChapter = async () => {
+    if (chapterToDelete === null) return;
+    
+    try {
+      const res = await fetch(`/api/chapters/${chapterToDelete}`, { method: "DELETE" });
+      if (res.ok) {
+        if (currentChapter?.id === chapterToDelete) {
+          setCurrentChapter(null);
+        }
+        if (selectedNovel) {
+          await fetchNovelDetails(selectedNovel.id);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setChapterToDelete(null);
+    }
+  };
+
   const handleBatchGenerate = async () => {
     if (!selectedNovel || isBatchGenerating) return;
+    
+    const controller = new AbortController();
+    setAbortController(controller);
     setIsBatchGenerating(true);
     setShowBatchModal(false);
+    
+    // Switch to novels tab to show the writing area
+    setActiveTab("novels");
     
     try {
       const activeOutlineContent = selectedNovel.outlines?.find(o => o.is_active === 1)?.content || "";
       
       for (let i = 0; i < batchCount; i++) {
+        if (controller.signal.aborted) break;
+        
         const novelInfoRes = await fetch(`/api/novels/${selectedNovel.id}`);
         if (!novelInfoRes.ok) throw new Error("Failed to fetch novel info during batch generate");
         const novelInfo = await novelInfoRes.json();
         const currentChapters = novelInfo.chapters || [];
         const nextChapterNum = currentChapters.length + 1;
-        const title = `${t.chapters} ${nextChapterNum}`;
+        const defaultTitle = `${t.chapters} ${nextChapterNum}`;
         
         // 1. Create chapter
         const createRes = await fetch("/api/chapters", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ novel_id: selectedNovel.id, title, content: "" }),
+          body: JSON.stringify({ novel_id: selectedNovel.id, title: defaultTitle, content: "" }),
         });
         if (!createRes.ok) throw new Error("Failed to create chapter during batch generate");
         const chapterData = await createRes.json();
-        const chapterId = chapterData.id;
-
-        // 2. Generate content
-        const prompt = `Write the full content for ${title}. Focus on advancing the plot according to the outline.`;
-        const context = `Novel Title: ${selectedNovel.title}\nOutline: ${activeOutlineContent}\nPrevious Chapters Context: ${currentChapters.slice(-1).map((c: any) => c.title + ": " + (c.content || "").slice(-300)).join("\n")}`;
-        const result = await generateAIContent(prompt, context, aiConfig, writingConfig, lang);
         
-        // 3. Update chapter
-        await fetch(`/api/chapters/${chapterId}`, {
+        // Update local chapters list and select the new chapter
+        await fetchNovelDetails(selectedNovel.id);
+        setCurrentChapter(chapterData);
+
+        // 2. Generate content with streaming
+        const prompt = `Write the full content for ${defaultTitle}. Focus on advancing the plot according to the outline.`;
+        const context = `Novel Title: ${selectedNovel.title}\nOutline: ${activeOutlineContent}\nPrevious Chapters Context: ${currentChapters.slice(-1).map((c: any) => c.title + ": " + (c.content || "").slice(-300)).join("\n")}`;
+        
+        let fullContent = "";
+        
+        const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal);
+        
+        for await (const chunk of stream) {
+          if (controller.signal.aborted) break;
+          fullContent += chunk;
+          
+          // Update current chapter state so user sees it in real-time
+          setCurrentChapter(prev => prev && prev.id === chapterData.id ? { ...prev, content: fullContent } : prev);
+        }
+        
+        if (controller.signal.aborted) break;
+
+        // 3. Update chapter in DB
+        await fetch(`/api/chapters/${chapterData.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
-            title: result.title || title,
-            content: result.text,
-            token_usage: Math.round(result.tokens)
+            content: fullContent,
+            token_usage: Math.round(fullContent.length / 4)
           }),
         });
+        
+        // Final refresh for this chapter
+        await fetchNovelDetails(selectedNovel.id);
       }
       
-      await fetchNovelDetails(selectedNovel.id);
       fetchStats();
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Batch generation aborted');
+      } else {
+        console.error(error);
+      }
     } finally {
       setIsBatchGenerating(false);
+      setAbortController(null);
     }
   };
 
@@ -677,6 +771,37 @@ export default function App() {
             </motion.div>
           </div>
         )}
+
+        {chapterToDelete !== null && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl"
+            >
+              <div className="w-12 h-12 bg-rose-500/10 text-rose-500 rounded-xl flex items-center justify-center mb-6">
+                <Trash2 size={24} />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">{t.deleteChapter}</h3>
+              <p className="text-zinc-400 mb-8">{t.confirmDelete}</p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setChapterToDelete(null)}
+                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={confirmDeleteChapter}
+                  className="flex-1 py-3 bg-rose-500 hover:bg-rose-400 text-white font-bold rounded-xl transition-all"
+                >
+                  确认删除
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
 
       {/* Batch Generate Modal */}
@@ -804,20 +929,34 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Batch Generating Overlay */}
+      {/* Batch Generating Indicator (Non-blocking) */}
       <AnimatePresence>
         {isBatchGenerating && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-md">
-            <div className="text-center">
-              <div className="relative w-24 h-24 mx-auto mb-6">
-                <div className="absolute inset-0 border-4 border-emerald-500/20 rounded-full"></div>
-                <div className="absolute inset-0 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                <Sparkles className="absolute inset-0 m-auto text-emerald-400 animate-pulse" size={32} />
-              </div>
-              <h3 className="text-2xl font-bold text-white mb-2">{t.generatingChapters}</h3>
-              <p className="text-zinc-400">AI 正在为您构思精彩剧情，请稍候...</p>
+          <motion.div 
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.9 }}
+            className="fixed bottom-8 right-8 z-[60] bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl flex items-center gap-6 backdrop-blur-md"
+          >
+            <div className="relative w-12 h-12 shrink-0">
+              <div className="absolute inset-0 border-2 border-emerald-500/20 rounded-full"></div>
+              <div className="absolute inset-0 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+              <Sparkles className="absolute inset-0 m-auto text-emerald-400 animate-pulse" size={16} />
             </div>
-          </div>
+            <div className="flex flex-col gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-white mb-1">{t.generatingChapters}</h3>
+                <p className="text-xs text-zinc-400">AI 正在为您构思精彩剧情，请稍候...</p>
+              </div>
+              <button 
+                onClick={() => abortController?.abort()}
+                className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg text-[10px] font-medium transition-all flex items-center justify-center gap-2"
+              >
+                <Square size={10} fill="currentColor" />
+                {t.stop}
+              </button>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -1008,22 +1147,33 @@ export default function App() {
                   <Card className="flex-1 flex flex-col p-4 overflow-hidden" title={t.chapters}>
                     <div className="flex-1 overflow-y-auto space-y-2 pr-2">
                       {chapters.map(ch => (
-                        <button
+                        <div
                           key={ch.id}
                           onClick={() => setCurrentChapter(ch)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === 'Enter' && setCurrentChapter(ch)}
                           className={cn(
-                            "w-full text-left p-3 rounded-lg text-sm transition-all",
+                            "w-full text-left p-3 rounded-lg text-sm transition-all relative group/chapter cursor-pointer",
                             currentChapter?.id === ch.id 
                               ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
                               : "text-zinc-400 hover:bg-zinc-800"
                           )}
                         >
-                          <div className="flex justify-between items-center">
+                          <div className="flex justify-between items-center pr-6">
                             <span className="truncate font-medium">{ch.title}</span>
                             {ch.status === 'published' && <Clock size={12} className="text-emerald-500" />}
                           </div>
                           <p className="text-[10px] text-zinc-600 mt-1">{ch.word_count} {t.words}</p>
-                        </button>
+                          
+                          <button
+                            onClick={(e) => handleDeleteChapter(e, ch.id)}
+                            className="absolute top-1/2 -translate-y-1/2 right-2 p-1.5 text-zinc-600 hover:text-rose-500 hover:bg-rose-500/10 rounded-md opacity-0 group-hover/chapter:opacity-100 transition-all"
+                            title={t.deleteChapter}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       ))}
                     </div>
                     <div className="flex gap-2 mt-4">
@@ -1057,7 +1207,7 @@ export default function App() {
                             className="bg-transparent border-none text-xl font-bold text-white focus:outline-none w-full"
                           />
                           <div className="flex items-center gap-4 text-xs text-zinc-500">
-                            <span>{currentChapter.content.length} {t.characters}</span>
+                            <span>{(currentChapter.content || "").length} {t.characters}</span>
                             <span>
                               {(() => {
                                 const content = currentChapter.content || "";
@@ -1070,6 +1220,7 @@ export default function App() {
                           </div>
                         </div>
                         <textarea
+                          ref={textareaRef}
                           value={currentChapter.content}
                           onChange={(e) => setCurrentChapter({...currentChapter, content: e.target.value})}
                           placeholder={t.startWriting}
@@ -1078,12 +1229,16 @@ export default function App() {
                         <div className="p-4 bg-zinc-900/80 border-t border-zinc-800 flex items-center justify-between gap-4">
                           <div className="flex items-center gap-3 flex-wrap">
                             <button 
-                              onClick={handleAIWrite}
-                              disabled={isGenerating || isSegmenting}
-                              className="px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50 whitespace-nowrap"
+                              onClick={isGenerating || isSegmenting ? () => abortController?.abort() : handleAIWrite}
+                              className={cn(
+                                "px-4 py-2 rounded-lg flex items-center gap-2 transition-all whitespace-nowrap",
+                                isGenerating || isSegmenting 
+                                  ? "bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20" 
+                                  : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20"
+                              )}
                             >
-                              <Sparkles size={16} />
-                              {isGenerating ? t.aiWriting : t.aiAssist}
+                              {isGenerating || isSegmenting ? <Square size={16} fill="currentColor" /> : <Sparkles size={16} className={isGenerating ? "animate-spin" : ""} />}
+                              {isGenerating || isSegmenting ? "停止 (Stop)" : t.aiAssist}
                             </button>
 
                             <button 

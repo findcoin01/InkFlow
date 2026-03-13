@@ -7,7 +7,8 @@ export async function generateAIContent(
   context: string, 
   config: AIConfig, 
   writingConfig: WritingConfig,
-  language: string = 'en'
+  language: string = 'en',
+  signal?: AbortSignal
 ) {
   const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
   
@@ -91,7 +92,7 @@ export async function generateAIContent(
         response_format: { type: "json_object" },
         temperature: 0.8,
         max_tokens: 4096,
-      });
+      }, { signal });
 
       const text = response.choices[0].message.content || "{}";
       const data = JSON.parse(text);
@@ -103,6 +104,87 @@ export async function generateAIContent(
       };
     } catch (error) {
       console.error(`${config.provider} Error:`, error);
+      throw error;
+    }
+  }
+}
+
+export async function* generateAIContentStream(
+  prompt: string, 
+  context: string, 
+  config: AIConfig, 
+  writingConfig: WritingConfig,
+  language: string = 'en',
+  signal?: AbortSignal
+) {
+  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
+  
+  let layoutInstruction = "";
+  if (writingConfig.layout === 'web') {
+    layoutInstruction = "STRICT LAYOUT RULE: Use web novel style. This means VERY short paragraphs (often just 1-2 sentences), frequent line breaks, and a lot of dialogue. Avoid long blocks of text at all costs.";
+  } else if (writingConfig.layout === 'traditional') {
+    layoutInstruction = "STRICT LAYOUT RULE: Use traditional literary style. This means longer, descriptive paragraphs, formal tone, and rich vocabulary. Use standard paragraph structures.";
+  } else {
+    layoutInstruction = "Use standard novel formatting with balanced paragraph lengths and natural flow.";
+  }
+
+  const wordCountInstruction = `The content should be between ${writingConfig.minWords} and ${writingConfig.maxWords} words.`;
+  const fullPrompt = `You are a creative novel writer. ${langInstruction}\n\n${layoutInstruction}\n${wordCountInstruction}\n\nContext: ${context}\n\nTask: ${prompt}\n\nIMPORTANT: Output ONLY the novel content text. Do not use JSON. Do not include titles or meta-talk.`;
+
+  if (config.provider === 'gemini') {
+    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+    const systemInstruction = `You are a creative novel writer. ${layoutInstruction} ${langInstruction} 
+    STRICT RULE: Output ONLY the novel content. DO NOT include meta-talk, chapter summaries, or concluding remarks. 
+    If continuing from previous text, start exactly where it left off without repeating anything.`;
+
+    try {
+      const response = await ai.models.generateContentStream({
+        model: config.model || "gemini-3-flash-preview",
+        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+        config: {
+          temperature: 0.8,
+          maxOutputTokens: 8192,
+          systemInstruction: systemInstruction,
+        }
+      });
+
+      for await (const chunk of response) {
+        if (signal?.aborted) break;
+        if (chunk.text) {
+          yield chunk.text;
+        }
+      }
+    } catch (error) {
+      console.error("Gemini Stream Error:", error);
+      throw error;
+    }
+  } else {
+    const openai = new OpenAI({
+      apiKey: config.apiKey || "",
+      baseURL: config.baseUrl || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      dangerouslyAllowBrowser: true
+    });
+
+    try {
+      const stream = await openai.chat.completions.create({
+        model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : "")),
+        messages: [
+          { role: "system", content: `You are a creative novel writer. ${layoutInstruction} ${langInstruction} Output ONLY the novel content text.` },
+          { role: "user", content: fullPrompt }
+        ],
+        temperature: 0.8,
+        max_tokens: 4096,
+        stream: true,
+      }, { signal });
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || "";
+        if (content) {
+          yield content;
+        }
+      }
+    } catch (error) {
+      console.error(`${config.provider} Stream Error:`, error);
       throw error;
     }
   }

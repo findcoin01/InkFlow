@@ -87,7 +87,9 @@ export const translations = {
     layoutTraditional: "Traditional (Indented)",
     layoutPreview: "Layout Preview",
     minWords: "Min Words",
-    maxWords: "Max Words"
+    maxWords: "Max Words",
+    stop: "Stop",
+    deleteChapter: "Delete Chapter"
   },
   zh: {
     appName: "墨流 (InkFlow)",
@@ -177,7 +179,9 @@ export const translations = {
     layoutTraditional: "传统 (首行缩进)",
     layoutPreview: "排版预览",
     minWords: "最小字数",
-    maxWords: "最大字数"
+    maxWords: "最大字数",
+    stop: "停止",
+    deleteChapter: "删除章节"
   }
 };
 
