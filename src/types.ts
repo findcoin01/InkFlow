@@ -9,6 +9,12 @@ export interface Novel {
   created_at: string;
   active_outline?: string;
   outlines?: OutlineVersion[];
+  target_chapters?: number;
+  cover_url?: string;
+  characters?: string; // JSON string
+  storylines?: string; // JSON string
+  world_setting?: string; // JSON string
+  relationships?: string; // JSON string
 }
 
 export interface OutlineVersion {
@@ -26,6 +32,7 @@ export interface Chapter {
   title: string;
   content: string;
   word_count: number;
+  order_index?: number;
   status: string;
   scheduled_at: string | null;
   published_at: string | null;

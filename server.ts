@@ -17,8 +17,14 @@ db.exec(`
     title TEXT NOT NULL,
     description TEXT,
     outline TEXT,
+    cover_url TEXT,
     status TEXT DEFAULT 'draft',
     views INTEGER DEFAULT 0,
+    target_chapters INTEGER DEFAULT 50,
+    characters TEXT,
+    storylines TEXT,
+    world_setting TEXT,
+    relationships TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -56,6 +62,14 @@ db.exec(`
   );
 `);
 
+// Migration for existing databases
+try { db.prepare("ALTER TABLE novels ADD COLUMN target_chapters INTEGER DEFAULT 50").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE novels ADD COLUMN characters TEXT").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE novels ADD COLUMN storylines TEXT").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE novels ADD COLUMN world_setting TEXT").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE novels ADD COLUMN cover_url TEXT").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE novels ADD COLUMN relationships TEXT").run(); } catch (e) {}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -92,6 +106,27 @@ async function startServer() {
     const chapters = db.prepare("SELECT * FROM chapters WHERE novel_id = ? ORDER BY created_at ASC").all(req.params.id);
     const outlines = db.prepare("SELECT * FROM outline_versions WHERE novel_id = ? ORDER BY created_at DESC").all(req.params.id);
     res.json({ ...novel, chapters, outlines });
+  });
+  
+  app.patch("/api/novels/:id", (req, res) => {
+    const { title, description, target_chapters, characters, storylines, world_setting, cover_url, relationships } = req.body;
+    db.prepare(`
+      UPDATE novels 
+      SET title = COALESCE(?, title),
+          description = COALESCE(?, description),
+          target_chapters = COALESCE(?, target_chapters),
+          characters = COALESCE(?, characters),
+          storylines = COALESCE(?, storylines),
+          world_setting = COALESCE(?, world_setting),
+          cover_url = COALESCE(?, cover_url),
+          relationships = COALESCE(?, relationships)
+      WHERE id = ?
+    `).run(title, description, target_chapters, characters, storylines, world_setting, cover_url, relationships, req.params.id);
+    
+    const updatedNovel = db.prepare("SELECT * FROM novels WHERE id = ?").get(req.params.id);
+    const chapters = db.prepare("SELECT * FROM chapters WHERE novel_id = ? ORDER BY created_at ASC").all(req.params.id);
+    const outlines = db.prepare("SELECT * FROM outline_versions WHERE novel_id = ? ORDER BY created_at DESC").all(req.params.id);
+    res.json({ ...updatedNovel, chapters, outlines });
   });
 
   app.delete("/api/novels/:id", (req, res) => {

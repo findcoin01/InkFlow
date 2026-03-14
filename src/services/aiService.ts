@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import OpenAI from "openai";
-import { AIConfig, WritingConfig } from "../types";
+import { AIConfig, WritingConfig, Chapter } from "../types";
 
 export async function generateAIContent(
   prompt: string, 
@@ -231,6 +231,131 @@ export async function generateAIOutline(title: string, genre: string, config: AI
       };
     } catch (error) {
       console.error(`${config.provider} Error:`, error);
+      throw error;
+    }
+  }
+}
+
+export async function generateChapterTitle(content: string, config: AIConfig, language: string = 'en') {
+  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
+  const fullPrompt = `Based on the following novel chapter content, generate a concise and fitting chapter title. ${langInstruction}\n\nContent: ${content.slice(0, 2000)}\n\nTask: Output ONLY the title text. No quotes, no 'Chapter X', just the title.`;
+
+  if (config.provider === 'gemini') {
+    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+    try {
+      const response = await ai.models.generateContent({
+        model: config.model || "gemini-3-flash-preview",
+        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+        config: { temperature: 0.7 }
+      });
+
+      return response.text?.trim() || "Untitled Chapter";
+    } catch (error) {
+      console.error("Gemini Error:", error);
+      return "Untitled Chapter";
+    }
+  } else {
+    const openai = new OpenAI({
+      apiKey: config.apiKey || "",
+      baseURL: config.baseUrl || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      dangerouslyAllowBrowser: true
+    });
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : "")),
+        messages: [{ role: "user", content: fullPrompt }],
+        temperature: 0.7,
+      });
+
+      return response.choices[0].message.content?.trim() || "Untitled Chapter";
+    } catch (error) {
+      console.error(`${config.provider} Error:`, error);
+      return "Untitled Chapter";
+    }
+  }
+}
+
+export async function extractNovelMetadata(
+  chapters: Chapter[], 
+  currentMetadata: { characters: string, storylines: string, world_setting: string, relationships: string },
+  config: AIConfig, 
+  language: string = 'en'
+) {
+  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
+  const recentChapters = chapters.slice(-10);
+  const chaptersContent = recentChapters.map(c => `Chapter ${c.title}:\n${c.content.slice(0, 1000)}`).join("\n\n");
+  
+  const fullPrompt = `You are a creative editor. Based on the provided chapter excerpts, extract and update the novel's metadata. 
+  ${langInstruction}
+  
+  Current Metadata:
+  Characters: ${currentMetadata.characters}
+  Storylines: ${currentMetadata.storylines}
+  World Setting: ${currentMetadata.world_setting}
+  Relationships: ${currentMetadata.relationships}
+  
+  Recent Chapter Excerpts:
+  ${chaptersContent}
+  
+  Task: Analyze the chapters and update the metadata. 
+  - Characters: List main characters, their traits, and current status.
+  - Storylines: Summarize main plot points and active subplots.
+  - World Setting: Update geography, magic systems, or social rules introduced.
+  - Relationships: Describe the connections between characters (e.g., "A is B's mentor", "C and D are rivals").
+  
+  Return the response in JSON format.`;
+
+  if (config.provider === 'gemini') {
+    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+    try {
+      const response = await ai.models.generateContent({
+        model: config.model || "gemini-3-flash-preview",
+        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+        config: {
+          temperature: 0.7,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              characters: { type: Type.STRING },
+              storylines: { type: Type.STRING },
+              world_setting: { type: Type.STRING },
+              relationships: { type: Type.STRING }
+            },
+            required: ["characters", "storylines", "world_setting", "relationships"]
+          }
+        }
+      });
+
+      let text = response.text || "{}";
+      return JSON.parse(text);
+    } catch (error) {
+      console.error("Gemini Metadata Extraction Error:", error);
+      throw error;
+    }
+  } else {
+    const openai = new OpenAI({
+      apiKey: config.apiKey || "",
+      baseURL: config.baseUrl || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      dangerouslyAllowBrowser: true
+    });
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : "")),
+        messages: [
+          { role: "system", content: "You are a creative editor. Return your response in JSON format with 'characters', 'storylines', 'world_setting', and 'relationships' keys." },
+          { role: "user", content: fullPrompt }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.7,
+      });
+
+      const text = response.choices[0].message.content || "{}";
+      return JSON.parse(text);
+    } catch (error) {
+      console.error(`${config.provider} Metadata Extraction Error:`, error);
       throw error;
     }
   }

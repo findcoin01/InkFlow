@@ -18,7 +18,10 @@ import {
   Trash2,
   X,
   Layers,
-  Square
+  Square,
+  Users,
+  GitBranch,
+  Network
 } from "lucide-react";
 import { 
   LineChart, 
@@ -38,7 +41,9 @@ import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
 import { cn } from "./lib/utils";
 import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout } from "./types";
-import { generateAIContent, generateAIOutline, generateAIContentStream } from "./services/aiService";
+import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, extractNovelMetadata } from "./services/aiService";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { translations, Language } from "./constants";
 
 // --- Components ---
@@ -105,9 +110,16 @@ export default function App() {
   const [activeOutline, setActiveOutline] = useState<OutlineVersion | null>(null);
   const [isWriting, setIsWriting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [isSegmenting, setIsSegmenting] = useState(false);
   const [segmentProgress, setSegmentProgress] = useState(0);
   const [isGeneratingOutline, setIsGeneratingOutline] = useState(false);
+  const [isSupplementing, setIsSupplementing] = useState(false);
+  const [editMode, setEditMode] = useState<{ [key: string]: boolean }>({});
+
+  const toggleEditMode = (section: string) => {
+    setEditMode(prev => ({ ...prev, [section]: !prev[section] }));
+  };
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -115,6 +127,7 @@ export default function App() {
   const [showPreview, setShowPreview] = useState(false);
   const [batchCount, setBatchCount] = useState(3);
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [novelToDelete, setNovelToDelete] = useState<number | null>(null);
   const [chapterToDelete, setChapterToDelete] = useState<number | null>(null);
   const [newNovelTitle, setNewNovelTitle] = useState("");
@@ -204,11 +217,67 @@ export default function App() {
       const data = await res.json();
       setSelectedNovel(data);
       setChapters(data.chapters || []);
+      setCurrentChapter(null);
       const active = data.outlines?.find((o: OutlineVersion) => o.is_active === 1) || data.outlines?.[0] || null;
       setActiveOutline(active);
       setActiveTab("editor");
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleSaveNovelDetails = async (updates: Partial<Novel>) => {
+    if (!selectedNovel) return;
+    try {
+      const response = await fetch(`/api/novels/${selectedNovel.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (response.ok) {
+        const updatedNovel = await response.json();
+        setSelectedNovel(updatedNovel);
+        setNovels(novels.map(n => n.id === updatedNovel.id ? updatedNovel : n));
+      }
+    } catch (error) {
+      console.error("Failed to save novel details:", error);
+    }
+  };
+
+  const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        handleSaveNovelDetails({ cover_url: reader.result as string });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleAISupplement = async () => {
+    if (!selectedNovel || isSupplementing) return;
+    setIsSupplementing(true);
+    try {
+      const result = await extractNovelMetadata(
+        chapters,
+        {
+          characters: selectedNovel.characters || "",
+          storylines: selectedNovel.storylines || "",
+          world_setting: selectedNovel.world_setting || "",
+          relationships: selectedNovel.relationships || ""
+        },
+        aiConfig,
+        lang
+      );
+      
+      if (result) {
+        await handleSaveNovelDetails(result);
+      }
+    } catch (error) {
+      console.error("Failed to supplement novel metadata:", error);
+    } finally {
+      setIsSupplementing(false);
     }
   };
 
@@ -234,6 +303,19 @@ export default function App() {
       console.error(error);
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleGenerateTitle = async () => {
+    if (!currentChapter || !currentChapter.content || isGeneratingTitle) return;
+    setIsGeneratingTitle(true);
+    try {
+      const title = await generateChapterTitle(currentChapter.content, aiConfig, lang);
+      setCurrentChapter({ ...currentChapter, title });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsGeneratingTitle(false);
     }
   };
 
@@ -533,6 +615,7 @@ export default function App() {
     const controller = new AbortController();
     setAbortController(controller);
     setIsBatchGenerating(true);
+    setBatchProgress({ current: 0, total: batchCount });
     setShowBatchModal(false);
     
     // Switch to novels tab to show the writing area
@@ -540,9 +623,12 @@ export default function App() {
     
     try {
       const activeOutlineContent = selectedNovel.outlines?.find(o => o.is_active === 1)?.content || "";
+      const targetChapters = selectedNovel.target_chapters || 50;
       
       for (let i = 0; i < batchCount; i++) {
         if (controller.signal.aborted) break;
+        
+        setBatchProgress(prev => ({ ...prev, current: i + 1 }));
         
         const novelInfoRes = await fetch(`/api/novels/${selectedNovel.id}`);
         if (!novelInfoRes.ok) throw new Error("Failed to fetch novel info during batch generate");
@@ -565,8 +651,12 @@ export default function App() {
         setCurrentChapter(chapterData);
 
         // 2. Generate content with streaming
-        const prompt = `Write the full content for ${defaultTitle}. Focus on advancing the plot according to the outline.`;
-        const context = `Novel Title: ${selectedNovel.title}\nOutline: ${activeOutlineContent}\nPrevious Chapters Context: ${currentChapters.slice(-1).map((c: any) => c.title + ": " + (c.content || "").slice(-300)).join("\n")}`;
+        const isLastChapter = nextChapterNum >= targetChapters;
+        const prompt = isLastChapter 
+          ? `Write the FINAL chapter (${defaultTitle}) of the novel. Bring the story to a satisfying conclusion and resolve all major plot points.`
+          : `Write chapter ${nextChapterNum} (${defaultTitle}). Focus on advancing the plot according to the outline. Current progress: ${nextChapterNum}/${targetChapters} chapters.`;
+        
+        const context = `Novel Title: ${selectedNovel.title}\nDescription: ${selectedNovel.description}\nTarget Total Chapters: ${targetChapters}\nOutline: ${activeOutlineContent}\nCharacters: ${selectedNovel.characters || "Not defined"}\nWorld Setting: ${selectedNovel.world_setting || "Not defined"}\nPrevious Chapters Context: ${currentChapters.slice(-2).map((c: any) => c.title + ": " + (c.content || "").slice(-500)).join("\n")}`;
         
         let fullContent = "";
         
@@ -582,15 +672,22 @@ export default function App() {
         
         if (controller.signal.aborted) break;
 
-        // 3. Update chapter in DB
+        // 3. Generate Title
+        const generatedTitle = await generateChapterTitle(fullContent, aiConfig, lang);
+
+        // 4. Update chapter in DB
         await fetch(`/api/chapters/${chapterData.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
+            title: generatedTitle,
             content: fullContent,
             token_usage: Math.round(fullContent.length / 4)
           }),
         });
+        
+        // Update local state for immediate feedback
+        setCurrentChapter(prev => prev && prev.id === chapterData.id ? { ...prev, title: generatedTitle, content: fullContent } : prev);
         
         // Final refresh for this chapter
         await fetchNovelDetails(selectedNovel.id);
@@ -1027,11 +1124,23 @@ export default function App() {
                       >
                         <div className="flex items-center gap-4">
                           <div className="w-12 h-16 bg-zinc-700 rounded-lg flex items-center justify-center text-zinc-500 overflow-hidden">
-                            <BookOpen size={24} />
+                            {novel.cover_url ? (
+                              <img src={novel.cover_url} alt={novel.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <BookOpen size={24} />
+                            )}
                           </div>
                           <div>
                             <h4 className="font-semibold text-zinc-100 group-hover:text-emerald-400 transition-colors">{novel.title}</h4>
                             <p className="text-xs text-zinc-500 mt-1">{novel.chapter_count} {t.chapters} • {novel.total_tokens?.toLocaleString() || 0} {t.tokens}</p>
+                            {novel.target_chapters && (
+                              <div className="w-32 h-1 bg-zinc-800 rounded-full mt-2 overflow-hidden">
+                                <div 
+                                  className="h-full bg-emerald-500"
+                                  style={{ width: `${Math.min((novel.chapter_count / novel.target_chapters) * 100, 100)}%` }}
+                                />
+                              </div>
+                            )}
                           </div>
                         </div>
                         <ChevronRight size={20} className="text-zinc-600 group-hover:text-emerald-400" />
@@ -1068,8 +1177,12 @@ export default function App() {
                       <Trash2 size={16} />
                     </button>
                     <div className="flex gap-4 mb-4">
-                      <div className="w-20 h-28 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-600 shadow-xl">
-                        <BookOpen size={40} />
+                      <div className="w-20 h-28 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-600 shadow-xl overflow-hidden">
+                        {novel.cover_url ? (
+                          <img src={novel.cover_url} alt={novel.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          <BookOpen size={40} />
+                        )}
                       </div>
                       <div className="flex-1">
                         <h3 className="text-xl font-bold text-white group-hover:text-emerald-400 transition-colors">{novel.title}</h3>
@@ -1079,7 +1192,20 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-800">
                       <div>
                         <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{t.progress}</p>
-                        <p className="text-sm text-zinc-200">{novel.chapter_count} {t.chapters}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm text-zinc-200">{novel.chapter_count} {t.chapters}</p>
+                          {novel.target_chapters && (
+                            <span className="text-[10px] text-zinc-500">/ {novel.target_chapters}</span>
+                          )}
+                        </div>
+                        {novel.target_chapters && (
+                          <div className="w-full h-1 bg-zinc-800 rounded-full mt-1 overflow-hidden">
+                            <div 
+                              className="h-full bg-emerald-500"
+                              style={{ width: `${Math.min((novel.chapter_count / novel.target_chapters) * 100, 100)}%` }}
+                            />
+                          </div>
+                        )}
                       </div>
                       <div>
                         <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{t.views}</p>
@@ -1092,9 +1218,9 @@ export default function App() {
             </motion.div>
           )}
 
-          {activeTab === "editor" && selectedNovel && (
+          {(activeTab === "editor" || activeTab === "world") && selectedNovel && (
             <motion.div
-              key="editor"
+              key="novel-view"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="h-full flex flex-col gap-6"
@@ -1107,12 +1233,44 @@ export default function App() {
                   >
                     <ChevronRight size={24} className="rotate-180" />
                   </button>
+                  <div className="w-10 h-14 bg-zinc-800 rounded flex items-center justify-center text-zinc-600 overflow-hidden border border-zinc-700">
+                    {selectedNovel.cover_url ? (
+                      <img src={selectedNovel.cover_url} alt="Cover" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <BookOpen size={20} />
+                    )}
+                  </div>
                   <div>
                     <h2 className="text-2xl font-bold text-white">{selectedNovel.title}</h2>
-                    <p className="text-sm text-zinc-500">{t.editingChapter}: {currentChapter?.title || t.selectChapter}</p>
+                    <div className="flex items-center gap-4 mt-1">
+                      <button 
+                        onClick={() => setActiveTab("editor")}
+                        className={cn("text-xs font-bold uppercase tracking-wider transition-all", activeTab === "editor" ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300")}
+                      >
+                        {t.chapters}
+                      </button>
+                      <button 
+                        onClick={() => setActiveTab("world")}
+                        className={cn("text-xs font-bold uppercase tracking-wider transition-all", activeTab === "world" ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300")}
+                      >
+                        {t.worldBuilding}
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  <div className="hidden md:flex flex-col items-end mr-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">{t.progress}:</span>
+                      <span className="text-[10px] text-zinc-300 font-mono">{chapters.length} / {selectedNovel.target_chapters || 0}</span>
+                    </div>
+                    <div className="w-32 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-emerald-500 transition-all duration-500"
+                        style={{ width: `${Math.min(100, (chapters.length / (selectedNovel.target_chapters || 1)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
                   <button 
                     onClick={(e) => handleDeleteNovel(e as any, selectedNovel.id)}
                     className="p-2 hover:bg-rose-500/10 text-zinc-500 hover:text-rose-500 rounded-lg transition-all"
@@ -1141,7 +1299,8 @@ export default function App() {
                 </div>
               </header>
 
-              <div className="flex-1 flex gap-6 min-h-0">
+              {activeTab === "editor" ? (
+                <div className="flex-1 flex gap-6 min-h-0">
                 {/* Chapter List */}
                 <div className="w-64 flex flex-col gap-4">
                   <Card className="flex-1 flex flex-col p-4 overflow-hidden" title={t.chapters}>
@@ -1177,20 +1336,42 @@ export default function App() {
                       ))}
                     </div>
                     <div className="flex gap-2 mt-4">
-                      <button 
-                        onClick={handleAddChapter}
-                        className="flex-1 py-2 border border-dashed border-zinc-700 hover:border-emerald-500/50 text-zinc-500 hover:text-emerald-400 rounded-lg flex items-center justify-center gap-2 transition-all"
-                      >
-                        <Plus size={16} />
-                        {t.addChapter}
-                      </button>
-                      <button 
-                        onClick={() => setShowBatchModal(true)}
-                        className="flex-1 py-2 border border-dashed border-zinc-700 hover:border-emerald-500/50 text-zinc-500 hover:text-emerald-400 rounded-lg flex items-center justify-center gap-2 transition-all"
-                        title={t.batchGenerate}
-                      >
-                        <Sparkles size={16} />
-                      </button>
+                      {isBatchGenerating ? (
+                        <div className="flex-1 p-2 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider animate-pulse">
+                              {t.batchGenerating}...
+                            </span>
+                            <span className="text-[10px] font-mono text-zinc-400">
+                              {batchProgress.current}/{batchProgress.total}
+                            </span>
+                          </div>
+                          <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
+                            <motion.div 
+                              className="h-full bg-emerald-500"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <button 
+                            onClick={handleAddChapter}
+                            className="flex-1 py-2 border border-dashed border-zinc-700 hover:border-emerald-500/50 text-zinc-500 hover:text-emerald-400 rounded-lg flex items-center justify-center gap-2 transition-all"
+                          >
+                            <Plus size={16} />
+                            {t.addChapter}
+                          </button>
+                          <button 
+                            onClick={() => setShowBatchModal(true)}
+                            className="flex-1 py-2 border border-dashed border-zinc-700 hover:border-emerald-500/50 text-zinc-500 hover:text-emerald-400 rounded-lg flex items-center justify-center gap-2 transition-all"
+                            title={t.batchGenerate}
+                          >
+                            <Sparkles size={16} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </Card>
                 </div>
@@ -1200,13 +1381,28 @@ export default function App() {
                   {currentChapter ? (
                     <>
                       <Card className="flex-1 p-0 overflow-hidden flex flex-col">
-                        <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
-                          <input 
-                            value={currentChapter.title}
-                            onChange={(e) => setCurrentChapter({...currentChapter, title: e.target.value})}
-                            className="bg-transparent border-none text-xl font-bold text-white focus:outline-none w-full"
-                          />
-                          <div className="flex items-center gap-4 text-xs text-zinc-500">
+                        <div className="p-4 border-b border-zinc-800 flex items-center justify-between gap-4">
+                          <div className="flex-1 flex items-center gap-2">
+                            <input 
+                              value={currentChapter.title}
+                              onChange={(e) => setCurrentChapter({...currentChapter, title: e.target.value})}
+                              className="bg-transparent border-none text-xl font-bold text-white focus:outline-none w-full"
+                            />
+                            <button 
+                              onClick={handleGenerateTitle}
+                              disabled={isGeneratingTitle}
+                              className={cn(
+                                "p-1.5 rounded-lg transition-all",
+                                isGeneratingTitle 
+                                  ? "text-emerald-400 bg-emerald-500/10 animate-pulse" 
+                                  : "text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10"
+                              )}
+                              title={t.generateTitle || "Generate Title"}
+                            >
+                              <Sparkles size={16} className={isGeneratingTitle ? "animate-spin" : ""} />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-4 text-xs text-zinc-500 shrink-0">
                             <span>{(currentChapter.content || "").length} {t.characters}</span>
                             <span>
                               {(() => {
@@ -1388,6 +1584,319 @@ export default function App() {
                   </Card>
                 </div>
               </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto pr-2 space-y-6 pb-12">
+                  <Card className="bg-emerald-500/5 border-emerald-500/20">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-emerald-400 uppercase tracking-wider mb-1">{t.aiSupplement}</h4>
+                        <p className="text-xs text-zinc-500">{t.aiSupplementDesc}</p>
+                      </div>
+                      <button 
+                        onClick={handleAISupplement}
+                        disabled={isSupplementing || chapters.length === 0}
+                        className={cn(
+                          "flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all",
+                          isSupplementing 
+                            ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" 
+                            : "bg-emerald-500 text-white hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 active:scale-95 disabled:opacity-50"
+                        )}
+                      >
+                        {isSupplementing ? (
+                          <>
+                            <div className="w-3 h-3 border-2 border-zinc-500 border-t-transparent rounded-full animate-spin" />
+                            {t.aiSupplementing}
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={14} />
+                            {t.aiSupplement}
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </Card>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <Card title={t.basicSettings} className="p-6">
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">{t.novelTitle}</label>
+                          <input 
+                            type="text"
+                            value={selectedNovel.title || ""}
+                            onChange={(e) => handleSaveNovelDetails({ title: e.target.value })}
+                            className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">{t.novelCover}</label>
+                          <div className="flex items-center gap-4">
+                            <div className="w-16 h-24 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-600 overflow-hidden border border-zinc-700">
+                              {selectedNovel.cover_url ? (
+                                <img src={selectedNovel.cover_url} alt="Cover" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <BookOpen size={24} />
+                              )}
+                            </div>
+                            <div className="flex-1 space-y-2">
+                              <input 
+                                type="text"
+                                value={selectedNovel.cover_url || ""}
+                                onChange={(e) => handleSaveNovelDetails({ cover_url: e.target.value })}
+                                placeholder={t.coverUrlPlaceholder}
+                                className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-white text-xs focus:outline-none focus:border-emerald-500 transition-all"
+                              />
+                              <label className="block">
+                                <span className="sr-only">Choose cover file</span>
+                                <input 
+                                  type="file" 
+                                  accept="image/*"
+                                  onChange={handleCoverUpload}
+                                  className="block w-full text-xs text-zinc-500
+                                    file:mr-4 file:py-2 file:px-4
+                                    file:rounded-full file:border-0
+                                    file:text-xs file:font-semibold
+                                    file:bg-emerald-500/10 file:text-emerald-400
+                                    hover:file:bg-emerald-500/20
+                                    cursor-pointer"
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">{t.targetChapters}</label>
+                          <div className="flex items-center gap-3">
+                            <input 
+                              type="number"
+                              value={selectedNovel.target_chapters || ""}
+                              onChange={(e) => {
+                                const val = e.target.value === "" ? 0 : parseInt(e.target.value);
+                                if (!isNaN(val)) {
+                                  handleSaveNovelDetails({ target_chapters: val });
+                                }
+                              }}
+                              className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                            />
+                            <span className="text-sm text-zinc-500">{t.chapters}</span>
+                          </div>
+                          <p className="text-[10px] text-zinc-600 mt-2 italic">
+                            设置目标章节数可以帮助 AI 更好地控制故事节奏并在接近尾声时自动完结。
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">{t.novelDescription}</label>
+                          <textarea 
+                            value={selectedNovel.description || ""}
+                            onChange={(e) => handleSaveNovelDetails({ description: e.target.value })}
+                            rows={6}
+                            placeholder="简述小说的主题、核心冲突和目标读者..."
+                            className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-all resize-none text-sm leading-relaxed"
+                          />
+                        </div>
+                      </div>
+                    </Card>
+
+                    <Card 
+                      title={t.worldSetting} 
+                      className="p-6 lg:col-span-2 flex flex-col min-h-[400px]"
+                      headerAction={
+                        <button 
+                          onClick={() => toggleEditMode('world')}
+                          className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors"
+                        >
+                          {editMode['world'] ? t.save : t.edit}
+                        </button>
+                      }
+                    >
+                      <div className="flex flex-col flex-1 overflow-hidden">
+                        <p className="text-[10px] text-zinc-500 mb-4">
+                          定义地理环境、力量体系、历史背景、社会规则等。AI 将参考这些设定来保证世界观的一致性。
+                        </p>
+                        <div className="flex-1 overflow-y-auto bg-zinc-800/50 border border-zinc-700 rounded-xl p-4">
+                          {editMode['world'] ? (
+                            <textarea 
+                              value={selectedNovel.world_setting || ""}
+                              onChange={(e) => handleSaveNovelDetails({ world_setting: e.target.value })}
+                              placeholder={t.worldSettingPlaceholder}
+                              className="w-full h-full bg-transparent border-none text-white focus:outline-none resize-none text-sm leading-relaxed font-mono"
+                            />
+                          ) : (
+                            <div className="prose prose-invert prose-sm max-w-none markdown-body">
+                              <Markdown remarkPlugins={[remarkGfm]}>
+                                {selectedNovel.world_setting || `*${t.worldSettingPlaceholder}*`}
+                              </Markdown>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Card 
+                      title={t.characters} 
+                      className="p-6 flex flex-col min-h-[400px]"
+                      headerAction={
+                        <button 
+                          onClick={() => toggleEditMode('characters')}
+                          className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors"
+                        >
+                          {editMode['characters'] ? t.save : t.edit}
+                        </button>
+                      }
+                    >
+                      <div className="flex flex-col flex-1 overflow-hidden">
+                        <div className="flex items-center justify-between mb-4">
+                          <p className="text-[10px] text-zinc-500">
+                            列出主要角色、性格特征、外貌描写及核心动机。
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <Users size={14} className="text-emerald-500" />
+                            <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">角色库</span>
+                          </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto bg-zinc-800/50 border border-zinc-700 rounded-xl p-4">
+                          {editMode['characters'] ? (
+                            <textarea 
+                              value={selectedNovel.characters || ""}
+                              onChange={(e) => handleSaveNovelDetails({ characters: e.target.value })}
+                              placeholder={t.charactersPlaceholder}
+                              className="w-full h-full bg-transparent border-none text-white focus:outline-none resize-none text-sm leading-relaxed"
+                            />
+                          ) : (
+                            <div className="prose prose-invert prose-sm max-w-none markdown-body">
+                              <Markdown remarkPlugins={[remarkGfm]}>
+                                {selectedNovel.characters || `*${t.charactersPlaceholder}*`}
+                              </Markdown>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+
+                    <Card 
+                      title={t.storylines} 
+                      className="p-6 flex flex-col min-h-[400px]"
+                      headerAction={
+                        <button 
+                          onClick={() => toggleEditMode('storylines')}
+                          className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors"
+                        >
+                          {editMode['storylines'] ? t.save : t.edit}
+                        </button>
+                      }
+                    >
+                      <div className="flex flex-col flex-1 overflow-hidden">
+                        <div className="flex items-center justify-between mb-4">
+                          <p className="text-[10px] text-zinc-500">
+                            规划主线剧情、支线任务、伏笔和高潮点。
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <GitBranch size={14} className="text-emerald-500" />
+                            <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">故事线</span>
+                          </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto bg-zinc-800/50 border border-zinc-700 rounded-xl p-4">
+                          {editMode['storylines'] ? (
+                            <textarea 
+                              value={selectedNovel.storylines || ""}
+                              onChange={(e) => handleSaveNovelDetails({ storylines: e.target.value })}
+                              placeholder={t.storylinesPlaceholder}
+                              className="w-full h-full bg-transparent border-none text-white focus:outline-none resize-none text-sm leading-relaxed"
+                            />
+                          ) : (
+                            <div className="prose prose-invert prose-sm max-w-none markdown-body">
+                              <Markdown remarkPlugins={[remarkGfm]}>
+                                {selectedNovel.storylines || `*${t.storylinesPlaceholder}*`}
+                              </Markdown>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-6">
+                    <Card 
+                      title={t.relationships} 
+                      className="p-6 flex flex-col min-h-[400px]"
+                      headerAction={
+                        <button 
+                          onClick={() => toggleEditMode('relationships')}
+                          className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors"
+                        >
+                          {editMode['relationships'] ? t.save : t.edit}
+                        </button>
+                      }
+                    >
+                      <div className="flex flex-col flex-1 overflow-hidden">
+                        <div className="flex items-center justify-between mb-4">
+                          <p className="text-[10px] text-zinc-500">
+                            可视化展示角色之间的复杂联系与情感纽带。
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <Network size={14} className="text-emerald-500" />
+                            <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">关系网</span>
+                          </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto bg-zinc-800/50 border border-zinc-700 rounded-xl p-4">
+                          {editMode['relationships'] ? (
+                            <textarea 
+                              value={selectedNovel.relationships || ""}
+                              onChange={(e) => handleSaveNovelDetails({ relationships: e.target.value })}
+                              placeholder={t.relationshipsPlaceholder}
+                              className="w-full h-full bg-transparent border-none text-white focus:outline-none resize-none text-sm leading-relaxed"
+                            />
+                          ) : (
+                            <div className="prose prose-invert prose-sm max-w-none markdown-body">
+                              <Markdown remarkPlugins={[remarkGfm]}>
+                                {selectedNovel.relationships || `*${t.relationshipsPlaceholder}*`}
+                              </Markdown>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+
+                    <Card title="可视化概览 (Visual Overview)" className="p-6">
+                      <div className="grid grid-cols-1 gap-8">
+                        <div className="space-y-4">
+                          <h4 className="text-sm font-bold text-zinc-400 flex items-center gap-2">
+                            <TrendingUp size={16} className="text-emerald-500" />
+                            故事进展曲线 (Story Progression)
+                          </h4>
+                          <div className="aspect-video bg-zinc-950 rounded-2xl border border-zinc-800 p-4">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <LineChart data={chapters.map(c => ({ name: c.order_index, words: c.word_count }))}>
+                                <Tooltip 
+                                  contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px' }}
+                                  itemStyle={{ color: '#10b981' }}
+                                />
+                                <Line 
+                                  type="monotone" 
+                                  dataKey="words" 
+                                  stroke="#10b981" 
+                                  strokeWidth={2} 
+                                  dot={{ fill: '#10b981', r: 2 }}
+                                  activeDot={{ r: 4, strokeWidth: 0 }}
+                                />
+                              </LineChart>
+                            </ResponsiveContainer>
+                            <div className="mt-2 flex justify-between text-[10px] text-zinc-600 font-bold uppercase tracking-widest">
+                              <span>开端</span>
+                              <span>发展</span>
+                              <span>高潮</span>
+                              <span>结局</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
 
