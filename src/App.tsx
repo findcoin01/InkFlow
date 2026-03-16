@@ -21,7 +21,10 @@ import {
   Square,
   Users,
   GitBranch,
-  Network
+  Network,
+  Globe,
+  FileText,
+  Type
 } from "lucide-react";
 import { 
   LineChart, 
@@ -41,7 +44,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
 import { cn } from "./lib/utils";
 import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout } from "./types";
-import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, extractNovelMetadata } from "./services/aiService";
+import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, extractNovelMetadata, generateChapterSummary, refactorWorldSetting } from "./services/aiService";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { translations, Language } from "./constants";
@@ -115,6 +118,7 @@ export default function App() {
   const [segmentProgress, setSegmentProgress] = useState(0);
   const [isGeneratingOutline, setIsGeneratingOutline] = useState(false);
   const [isSupplementing, setIsSupplementing] = useState(false);
+  const [isRefactoringWorld, setIsRefactoringWorld] = useState(false);
   const [editMode, setEditMode] = useState<{ [key: string]: boolean }>({});
 
   const toggleEditMode = (section: string) => {
@@ -135,6 +139,14 @@ export default function App() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   useEffect(() => {
     if ((isGenerating || isSegmenting || isBatchGenerating) && textareaRef.current) {
@@ -169,6 +181,8 @@ export default function App() {
       minWords: 1000,
       maxWords: 2000,
       layout: 'standard',
+      enforceWordCount: true,
+      autoSummarize: true,
     };
   });
 
@@ -191,29 +205,31 @@ export default function App() {
   const fetchNovels = async () => {
     try {
       const res = await fetch("/api/novels");
-      if (!res.ok) throw new Error("Failed to fetch novels");
+      if (!res.ok) throw new Error(t.fetchError || "Failed to fetch novels");
       const data = await res.json();
       setNovels(data);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setToast({ message: e.message || "Failed to fetch novels", type: 'error' });
     }
   };
 
   const fetchStats = async () => {
     try {
       const res = await fetch("/api/stats/tokens");
-      if (!res.ok) throw new Error("Failed to fetch stats");
+      if (!res.ok) throw new Error(t.fetchError || "Failed to fetch stats");
       const data = await res.json();
       setStats(data);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setToast({ message: e.message || "Failed to fetch stats", type: 'error' });
     }
   };
 
   const fetchNovelDetails = async (id: number) => {
     try {
       const res = await fetch(`/api/novels/${id}`);
-      if (!res.ok) throw new Error("Failed to fetch novel details");
+      if (!res.ok) throw new Error(t.fetchError || "Failed to fetch novel details");
       const data = await res.json();
       setSelectedNovel(data);
       setChapters(data.chapters || []);
@@ -221,8 +237,9 @@ export default function App() {
       const active = data.outlines?.find((o: OutlineVersion) => o.is_active === 1) || data.outlines?.[0] || null;
       setActiveOutline(active);
       setActiveTab("editor");
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setToast({ message: e.message || "Failed to fetch novel details", type: 'error' });
     }
   };
 
@@ -238,9 +255,12 @@ export default function App() {
         const updatedNovel = await response.json();
         setSelectedNovel(updatedNovel);
         setNovels(novels.map(n => n.id === updatedNovel.id ? updatedNovel : n));
+      } else {
+        throw new Error(t.saveError || "Failed to save novel details");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to save novel details:", error);
+      setToast({ message: error.message || "Failed to save novel details", type: 'error' });
     }
   };
 
@@ -252,6 +272,21 @@ export default function App() {
         handleSaveNovelDetails({ cover_url: reader.result as string });
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRefactorWorldSetting = async () => {
+    if (!selectedNovel || !selectedNovel.world_setting) return;
+    setIsRefactoringWorld(true);
+    try {
+      const refactored = await refactorWorldSetting(selectedNovel.world_setting, aiConfig, lang);
+      if (refactored) {
+        await handleSaveNovelDetails({ world_setting: refactored });
+      }
+    } catch (error) {
+      console.error("Error refactoring world setting:", error);
+    } finally {
+      setIsRefactoringWorld(false);
     }
   };
 
@@ -293,14 +328,17 @@ export default function App() {
           description: newNovelGenre || t.newNovelDraft
         }),
       });
+      if (!res.ok) throw new Error(t.createError || "Failed to create novel");
       const data = await res.json();
       setNewNovelTitle("");
       setNewNovelGenre("");
       setShowCreateModal(false);
       await fetchNovels();
       await fetchNovelDetails(data.id);
-    } catch (error) {
+      setToast({ message: t.saveSettings || "Novel created successfully", type: 'success' });
+    } catch (error: any) {
       console.error(error);
+      setToast({ message: error.message || "Failed to create novel", type: 'error' });
     } finally {
       setIsCreating(false);
     }
@@ -343,11 +381,12 @@ export default function App() {
           scheduled_at: scheduledAt || null
         }),
       });
-      if (!res.ok) throw new Error("Failed to save chapter");
+      if (!res.ok) throw new Error(t.saveError || "Failed to save chapter");
       await fetchNovelDetails(selectedNovel.id);
       setLastSavedAt(new Date());
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving chapter:", error);
+      setToast({ message: error.message || "Failed to save chapter", type: 'error' });
     } finally {
       setIsSaving(false);
     }
@@ -364,10 +403,12 @@ export default function App() {
           version_name: activeOutline.version_name
         }),
       });
-      if (!res.ok) throw new Error("Failed to save outline");
+      if (!res.ok) throw new Error(t.saveError || "Failed to save outline");
       fetchNovelDetails(selectedNovel.id);
-    } catch (error) {
+      setToast({ message: t.saveSettings || "Outline saved", type: 'success' });
+    } catch (error: any) {
       console.error("Error saving outline:", error);
+      setToast({ message: error.message || "Failed to save outline", type: 'error' });
     }
   };
 
@@ -381,10 +422,12 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ version_name: name, content: activeOutline?.content || "" }),
       });
-      if (!res.ok) throw new Error("Failed to create outline version");
+      if (!res.ok) throw new Error(t.createError || "Failed to create outline version");
       fetchNovelDetails(selectedNovel.id);
-    } catch (error) {
+      setToast({ message: t.newVersion + " " + t.active, type: 'success' });
+    } catch (error: any) {
       console.error("Error creating outline version:", error);
+      setToast({ message: error.message || "Failed to create outline version", type: 'error' });
     }
   };
 
@@ -394,10 +437,12 @@ export default function App() {
       const res = await fetch(`/api/outlines/${id}/activate`, {
         method: "PATCH",
       });
-      if (!res.ok) throw new Error("Failed to activate outline");
+      if (!res.ok) throw new Error(t.saveError || "Failed to activate outline");
       fetchNovelDetails(selectedNovel.id);
-    } catch (error) {
+      setToast({ message: t.activate + " " + t.active, type: 'success' });
+    } catch (error: any) {
       console.error("Error activating outline:", error);
+      setToast({ message: error.message || "Failed to activate outline", type: 'error' });
     }
   };
 
@@ -413,7 +458,7 @@ export default function App() {
       const res = await fetch(`/api/novels/${novelToDelete}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error("Failed to delete novel");
+      if (!res.ok) throw new Error(t.deleteError || "Failed to delete novel");
       
       if (selectedNovel?.id === novelToDelete) {
         setSelectedNovel(null);
@@ -422,8 +467,35 @@ export default function App() {
       setNovelToDelete(null);
       fetchNovels();
       fetchStats();
-    } catch (error) {
+      setToast({ message: t.deleteNovel + " " + t.active, type: 'success' });
+    } catch (error: any) {
       console.error("Error deleting novel:", error);
+      setToast({ message: error.message || "Failed to delete novel", type: 'error' });
+    }
+  };
+
+  const handleGenerateSummary = async () => {
+    if (!currentChapter || !selectedNovel || !currentChapter.content) return;
+    setIsGenerating(true);
+    try {
+      const summary = await generateChapterSummary(currentChapter.content, aiConfig, lang);
+      if (summary) {
+        setCurrentChapter(prev => prev ? { ...prev, summary } : null);
+        const res = await fetch(`/api/chapters/${currentChapter.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ summary }),
+        });
+        if (!res.ok) throw new Error(t.saveError || "Failed to save summary");
+        // Refresh novel details to update the list
+        await fetchNovelDetails(selectedNovel.id);
+        setToast({ message: t.summarize + " " + t.active, type: 'success' });
+      }
+    } catch (error: any) {
+      console.error("Error generating summary:", error);
+      setToast({ message: error.message || "Failed to generate summary", type: 'error' });
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -464,11 +536,15 @@ export default function App() {
       });
       
       fetchStats();
+      if (writingConfig.autoSummarize) {
+        handleGenerateSummary();
+      }
     } catch (error: any) {
       if (error.name === 'AbortError') {
         console.log('Generation aborted');
       } else {
         console.error(error);
+        setToast({ message: error.message || "AI generation failed", type: 'error' });
       }
     } finally {
       setIsGenerating(false);
@@ -532,17 +608,41 @@ export default function App() {
         }),
       });
       fetchStats();
+      if (writingConfig.autoSummarize) {
+        handleGenerateSummary();
+      }
     } catch (error: any) {
       if (error.name === 'AbortError') {
         console.log('Segmented write aborted');
       } else {
         console.error("Segmented Write Error:", error);
+        setToast({ message: error.message || "Segmented writing failed", type: 'error' });
       }
     } finally {
       setIsSegmenting(false);
       setSegmentProgress(0);
       setAbortController(null);
     }
+  };
+
+  const getChapterTitleFromOutline = (outlineContent: string, chapterNum: number) => {
+    if (!outlineContent) return "";
+    const lines = outlineContent.split('\n');
+    const chapterPatterns = [
+      new RegExp(`(?:Chapter|第)\\s*${chapterNum}\\s*(?:[:：]|章)?\\s*(.+)`, 'i'),
+      new RegExp(`^${chapterNum}\\.\\s*(.+)`),
+      new RegExp(`^${chapterNum}[\\s：:](.+)`)
+    ];
+    
+    for (const line of lines) {
+      for (const pattern of chapterPatterns) {
+        const match = line.match(pattern);
+        if (match && match[1]) {
+          return match[1].trim();
+        }
+      }
+    }
+    return "";
   };
 
   const handleAIGenerateOutline = async () => {
@@ -563,9 +663,13 @@ export default function App() {
       
       if (res.ok) {
         await fetchNovelDetails(selectedNovel.id);
+        setToast({ message: t.generateOutline + " " + t.active, type: 'success' });
+      } else {
+        throw new Error(t.createError || "Failed to save generated outline");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
+      setToast({ message: error.message || "Failed to generate outline", type: 'error' });
     } finally {
       setIsGeneratingOutline(false);
     }
@@ -573,15 +677,26 @@ export default function App() {
 
   const handleAddChapter = async () => {
     if (!selectedNovel) return;
-    const title = `${t.chapters} ${chapters.length + 1}`;
-    const res = await fetch("/api/chapters", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ novel_id: selectedNovel.id, title, content: "" }),
-    });
-    const data = await res.json();
-    await fetchNovelDetails(selectedNovel.id);
-    return data.id;
+    try {
+      const nextChapterNum = chapters.length + 1;
+      const activeOutlineContent = selectedNovel.outlines?.find(o => o.is_active === 1)?.content || "";
+      const outlineTitle = getChapterTitleFromOutline(activeOutlineContent, nextChapterNum);
+      
+      const title = outlineTitle || `${t.chapters} ${nextChapterNum}`;
+      const res = await fetch("/api/chapters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ novel_id: selectedNovel.id, title, content: "" }),
+      });
+      if (!res.ok) throw new Error(t.createError || "Failed to create chapter");
+      const data = await res.json();
+      await fetchNovelDetails(selectedNovel.id);
+      setToast({ message: t.chapters + " " + t.active, type: 'success' });
+      return data.id;
+    } catch (error: any) {
+      console.error(error);
+      setToast({ message: error.message || "Failed to create chapter", type: 'error' });
+    }
   };
 
   const handleDeleteChapter = async (e: React.MouseEvent, chapterId: number) => {
@@ -594,16 +709,17 @@ export default function App() {
     
     try {
       const res = await fetch(`/api/chapters/${chapterToDelete}`, { method: "DELETE" });
-      if (res.ok) {
-        if (currentChapter?.id === chapterToDelete) {
-          setCurrentChapter(null);
-        }
-        if (selectedNovel) {
-          await fetchNovelDetails(selectedNovel.id);
-        }
+      if (!res.ok) throw new Error(t.deleteError || "Failed to delete chapter");
+      if (currentChapter?.id === chapterToDelete) {
+        setCurrentChapter(null);
       }
-    } catch (e) {
+      if (selectedNovel) {
+        await fetchNovelDetails(selectedNovel.id);
+      }
+      setToast({ message: t.deleteChapter + " " + t.active, type: 'success' });
+    } catch (e: any) {
       console.error(e);
+      setToast({ message: e.message || "Failed to delete chapter", type: 'error' });
     } finally {
       setChapterToDelete(null);
     }
@@ -635,7 +751,11 @@ export default function App() {
         const novelInfo = await novelInfoRes.json();
         const currentChapters = novelInfo.chapters || [];
         const nextChapterNum = currentChapters.length + 1;
-        const defaultTitle = `${t.chapters} ${nextChapterNum}`;
+        
+        // Try to find title in outline
+        const outlineTitle = getChapterTitleFromOutline(activeOutlineContent, nextChapterNum);
+
+        const defaultTitle = outlineTitle || `${t.chapters} ${nextChapterNum}`;
         
         // 1. Create chapter
         const createRes = await fetch("/api/chapters", {
@@ -672,22 +792,29 @@ export default function App() {
         
         if (controller.signal.aborted) break;
 
-        // 3. Generate Title
-        const generatedTitle = await generateChapterTitle(fullContent, aiConfig, lang);
+        // 3. Generate Title (only if not from outline)
+        let finalTitle = defaultTitle;
+        if (!outlineTitle) {
+          finalTitle = await generateChapterTitle(fullContent, aiConfig, lang);
+        }
 
-        // 4. Update chapter in DB
+        // 4. Generate Summary
+        const summary = await generateChapterSummary(fullContent, aiConfig, lang);
+
+        // 5. Update chapter in DB
         await fetch(`/api/chapters/${chapterData.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
-            title: generatedTitle,
+            title: finalTitle,
             content: fullContent,
+            summary: summary,
             token_usage: Math.round(fullContent.length / 4)
           }),
         });
         
         // Update local state for immediate feedback
-        setCurrentChapter(prev => prev && prev.id === chapterData.id ? { ...prev, title: generatedTitle, content: fullContent } : prev);
+        setCurrentChapter(prev => prev && prev.id === chapterData.id ? { ...prev, title: finalTitle, content: fullContent, summary: summary } : prev);
         
         // Final refresh for this chapter
         await fetchNovelDetails(selectedNovel.id);
@@ -699,6 +826,7 @@ export default function App() {
         console.log('Batch generation aborted');
       } else {
         console.error(error);
+        setToast({ message: error.message || "Batch generation failed", type: 'error' });
       }
     } finally {
       setIsBatchGenerating(false);
@@ -797,7 +925,7 @@ export default function App() {
                   <label className="block text-sm font-medium text-zinc-400 mb-2">{t.novel} {t.appName}</label>
                   <input 
                     autoFocus
-                    value={newNovelTitle}
+                    value={newNovelTitle || ""}
                     onChange={(e) => setNewNovelTitle(e.target.value)}
                     placeholder={t.enterTitle}
                     onKeyDown={(e) => e.key === 'Enter' && handleCreateNovel()}
@@ -807,7 +935,7 @@ export default function App() {
                 <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-2">类型/风格 (Genre/Style)</label>
                   <input 
-                    value={newNovelGenre}
+                    value={newNovelGenre || ""}
                     onChange={(e) => setNewNovelGenre(e.target.value)}
                     placeholder="例如：玄幻、都市、科幻..."
                     className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
@@ -1384,7 +1512,7 @@ export default function App() {
                         <div className="p-4 border-b border-zinc-800 flex items-center justify-between gap-4">
                           <div className="flex-1 flex items-center gap-2">
                             <input 
-                              value={currentChapter.title}
+                              value={currentChapter.title || ""}
                               onChange={(e) => setCurrentChapter({...currentChapter, title: e.target.value})}
                               className="bg-transparent border-none text-xl font-bold text-white focus:outline-none w-full"
                             />
@@ -1415,9 +1543,20 @@ export default function App() {
                             </span>
                           </div>
                         </div>
+                        {currentChapter.summary && (
+                          <div className="mx-8 mt-4 p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-xl">
+                            <div className="flex items-center gap-2 mb-2">
+                              <FileText size={14} className="text-emerald-500" />
+                              <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">{t.summary}</span>
+                            </div>
+                            <p className="text-xs text-zinc-400 leading-relaxed italic">
+                              {currentChapter.summary}
+                            </p>
+                          </div>
+                        )}
                         <textarea
                           ref={textareaRef}
-                          value={currentChapter.content}
+                          value={currentChapter.content || ""}
                           onChange={(e) => setCurrentChapter({...currentChapter, content: e.target.value})}
                           placeholder={t.startWriting}
                           className="flex-1 p-8 bg-transparent border-none text-zinc-300 text-lg leading-relaxed focus:outline-none resize-none"
@@ -1435,6 +1574,16 @@ export default function App() {
                             >
                               {isGenerating || isSegmenting ? <Square size={16} fill="currentColor" /> : <Sparkles size={16} className={isGenerating ? "animate-spin" : ""} />}
                               {isGenerating || isSegmenting ? "停止 (Stop)" : t.aiAssist}
+                            </button>
+
+                            <button 
+                              onClick={handleGenerateSummary}
+                              disabled={isGenerating || isSegmenting || !currentChapter.content}
+                              className="px-4 py-2 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-400 border border-zinc-700/50 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50 whitespace-nowrap"
+                              title={t.summarize}
+                            >
+                              <FileText size={16} />
+                              {t.summarize}
                             </button>
 
                             <button 
@@ -1531,7 +1680,7 @@ export default function App() {
                       <div className="flex flex-col h-full gap-4">
                         <div className="flex items-center justify-between">
                           <select 
-                            value={activeOutline.id}
+                            value={activeOutline.id || ""}
                             onChange={(e) => {
                               const selected = selectedNovel.outlines?.find(o => o.id === parseInt(e.target.value));
                               if (selected) setActiveOutline(selected);
@@ -1570,7 +1719,7 @@ export default function App() {
                           </div>
                         </div>
                         <textarea 
-                          value={activeOutline.content}
+                          value={activeOutline.content || ""}
                           onChange={(e) => setActiveOutline({...activeOutline, content: e.target.value})}
                           placeholder={t.outlinePlaceholder}
                           className="flex-1 bg-transparent border-none text-sm text-zinc-400 leading-relaxed focus:outline-none resize-none"
@@ -1619,7 +1768,32 @@ export default function App() {
 
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <Card title={t.basicSettings} className="p-6">
-                      <div className="space-y-4">
+                      <div className="space-y-6">
+                        <div className="grid grid-cols-2 gap-4 p-4 bg-zinc-900/50 rounded-2xl border border-zinc-800/50">
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.currentChapters}</p>
+                            <p className="text-xl font-bold text-white font-mono">{chapters.length}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.totalWords}</p>
+                            <p className="text-xl font-bold text-emerald-400 font-mono">
+                              {chapters.reduce((acc, c) => acc + (c.word_count || 0), 0).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="col-span-2 pt-2">
+                            <div className="flex justify-between items-center mb-1.5">
+                              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.novelProgress}</p>
+                              <p className="text-[10px] font-bold text-zinc-400">{Math.round((chapters.length / (selectedNovel.target_chapters || 1)) * 100)}%</p>
+                            </div>
+                            <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-emerald-500 transition-all duration-500"
+                                style={{ width: `${Math.min(100, (chapters.length / (selectedNovel.target_chapters || 1)) * 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
                         <div>
                           <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">{t.novelTitle}</label>
                           <input 
@@ -1700,21 +1874,42 @@ export default function App() {
 
                     <Card 
                       title={t.worldSetting} 
-                      className="p-6 lg:col-span-2 flex flex-col min-h-[400px]"
+                      className="p-6 lg:col-span-2 flex flex-col min-h-[450px] group/card"
                       headerAction={
-                        <button 
-                          onClick={() => toggleEditMode('world')}
-                          className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors"
-                        >
-                          {editMode['world'] ? t.save : t.edit}
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700">
+                            <Globe size={12} className="text-emerald-500" />
+                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">System</span>
+                          </div>
+                          {selectedNovel.world_setting && (
+                            <button 
+                              onClick={handleRefactorWorldSetting}
+                              disabled={isRefactoringWorld}
+                              className={cn(
+                                "text-[10px] font-bold uppercase tracking-wider transition-colors px-2 py-1 rounded flex items-center gap-1.5",
+                                isRefactoringWorld 
+                                  ? "bg-emerald-500/20 text-emerald-400 animate-pulse" 
+                                  : "text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10"
+                              )}
+                            >
+                              <Sparkles size={10} className={isRefactoringWorld ? "animate-spin" : ""} />
+                              {isRefactoringWorld ? t.refactoring : t.refactor}
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => toggleEditMode('world')}
+                            className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors px-2 py-1 hover:bg-emerald-500/10 rounded"
+                          >
+                            {editMode['world'] ? t.save : t.edit}
+                          </button>
+                        </div>
                       }
                     >
                       <div className="flex flex-col flex-1 overflow-hidden">
-                        <p className="text-[10px] text-zinc-500 mb-4">
+                        <p className="text-[10px] text-zinc-500 mb-4 leading-relaxed">
                           定义地理环境、力量体系、历史背景、社会规则等。AI 将参考这些设定来保证世界观的一致性。
                         </p>
-                        <div className="flex-1 overflow-y-auto bg-zinc-800/50 border border-zinc-700 rounded-xl p-4">
+                        <div className="flex-1 overflow-y-auto bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 shadow-inner">
                           {editMode['world'] ? (
                             <textarea 
                               value={selectedNovel.world_setting || ""}
@@ -1737,27 +1932,27 @@ export default function App() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <Card 
                       title={t.characters} 
-                      className="p-6 flex flex-col min-h-[400px]"
+                      className="p-6 flex flex-col min-h-[450px] group/card"
                       headerAction={
-                        <button 
-                          onClick={() => toggleEditMode('characters')}
-                          className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors"
-                        >
-                          {editMode['characters'] ? t.save : t.edit}
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700">
+                            <Users size={12} className="text-emerald-500" />
+                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">Library</span>
+                          </div>
+                          <button 
+                            onClick={() => toggleEditMode('characters')}
+                            className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors px-2 py-1 hover:bg-emerald-500/10 rounded"
+                          >
+                            {editMode['characters'] ? t.save : t.edit}
+                          </button>
+                        </div>
                       }
                     >
                       <div className="flex flex-col flex-1 overflow-hidden">
-                        <div className="flex items-center justify-between mb-4">
-                          <p className="text-[10px] text-zinc-500">
-                            列出主要角色、性格特征、外貌描写及核心动机。
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <Users size={14} className="text-emerald-500" />
-                            <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">角色库</span>
-                          </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto bg-zinc-800/50 border border-zinc-700 rounded-xl p-4">
+                        <p className="text-[10px] text-zinc-500 mb-4 leading-relaxed">
+                          列出主要角色、性格特征、外貌描写及核心动机。
+                        </p>
+                        <div className="flex-1 overflow-y-auto bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 shadow-inner">
                           {editMode['characters'] ? (
                             <textarea 
                               value={selectedNovel.characters || ""}
@@ -1778,27 +1973,27 @@ export default function App() {
 
                     <Card 
                       title={t.storylines} 
-                      className="p-6 flex flex-col min-h-[400px]"
+                      className="p-6 flex flex-col min-h-[450px] group/card"
                       headerAction={
-                        <button 
-                          onClick={() => toggleEditMode('storylines')}
-                          className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors"
-                        >
-                          {editMode['storylines'] ? t.save : t.edit}
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700">
+                            <GitBranch size={12} className="text-emerald-500" />
+                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">Threads</span>
+                          </div>
+                          <button 
+                            onClick={() => toggleEditMode('storylines')}
+                            className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors px-2 py-1 hover:bg-emerald-500/10 rounded"
+                          >
+                            {editMode['storylines'] ? t.save : t.edit}
+                          </button>
+                        </div>
                       }
                     >
                       <div className="flex flex-col flex-1 overflow-hidden">
-                        <div className="flex items-center justify-between mb-4">
-                          <p className="text-[10px] text-zinc-500">
-                            规划主线剧情、支线任务、伏笔和高潮点。
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <GitBranch size={14} className="text-emerald-500" />
-                            <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">故事线</span>
-                          </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto bg-zinc-800/50 border border-zinc-700 rounded-xl p-4">
+                        <p className="text-[10px] text-zinc-500 mb-4 leading-relaxed">
+                          规划主线剧情、支线任务、伏笔和高潮点。
+                        </p>
+                        <div className="flex-1 overflow-y-auto bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 shadow-inner">
                           {editMode['storylines'] ? (
                             <textarea 
                               value={selectedNovel.storylines || ""}
@@ -1821,27 +2016,27 @@ export default function App() {
                   <div className="grid grid-cols-1 gap-6">
                     <Card 
                       title={t.relationships} 
-                      className="p-6 flex flex-col min-h-[400px]"
+                      className="p-6 flex flex-col min-h-[450px] group/card"
                       headerAction={
-                        <button 
-                          onClick={() => toggleEditMode('relationships')}
-                          className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors"
-                        >
-                          {editMode['relationships'] ? t.save : t.edit}
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700">
+                            <Network size={12} className="text-emerald-500" />
+                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">Network</span>
+                          </div>
+                          <button 
+                            onClick={() => toggleEditMode('relationships')}
+                            className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 hover:text-emerald-300 transition-colors px-2 py-1 hover:bg-emerald-500/10 rounded"
+                          >
+                            {editMode['relationships'] ? t.save : t.edit}
+                          </button>
+                        </div>
                       }
                     >
                       <div className="flex flex-col flex-1 overflow-hidden">
-                        <div className="flex items-center justify-between mb-4">
-                          <p className="text-[10px] text-zinc-500">
-                            可视化展示角色之间的复杂联系与情感纽带。
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <Network size={14} className="text-emerald-500" />
-                            <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">关系网</span>
-                          </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto bg-zinc-800/50 border border-zinc-700 rounded-xl p-4">
+                        <p className="text-[10px] text-zinc-500 mb-4 leading-relaxed">
+                          可视化展示角色之间的复杂联系与情感纽带。
+                        </p>
+                        <div className="flex-1 overflow-y-auto bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 shadow-inner">
                           {editMode['relationships'] ? (
                             <textarea 
                               value={selectedNovel.relationships || ""}
@@ -2028,7 +2223,7 @@ export default function App() {
                     <label className="text-sm font-medium text-zinc-400">{t.aiModel}</label>
                     <input
                       type="text"
-                      value={aiConfig.model}
+                      value={aiConfig.model || ""}
                       onChange={(e) => setAiConfig({ ...aiConfig, model: e.target.value })}
                       placeholder={t.modelPlaceholder}
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
@@ -2075,7 +2270,7 @@ export default function App() {
                         <span className="text-[10px] uppercase text-zinc-500 font-bold">{t.minWords}</span>
                         <input
                           type="number"
-                          value={writingConfig.minWords}
+                          value={writingConfig.minWords ?? ""}
                           onChange={(e) => setWritingConfig({ ...writingConfig, minWords: parseInt(e.target.value) || 0 })}
                           className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
                         />
@@ -2084,12 +2279,60 @@ export default function App() {
                         <span className="text-[10px] uppercase text-zinc-500 font-bold">{t.maxWords}</span>
                         <input
                           type="number"
-                          value={writingConfig.maxWords}
+                          value={writingConfig.maxWords ?? ""}
                           onChange={(e) => setWritingConfig({ ...writingConfig, maxWords: parseInt(e.target.value) || 0 })}
                           className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
                         />
                       </div>
                     </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 bg-zinc-800/30 rounded-xl border border-zinc-700/50">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-emerald-500/10 rounded-lg flex items-center justify-center text-emerald-500">
+                        <Type size={20} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-zinc-200">{t.enforceWordCount}</p>
+                        <p className="text-xs text-zinc-500">Enable or disable word count limits for AI generation.</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setWritingConfig({ ...writingConfig, enforceWordCount: !writingConfig.enforceWordCount })}
+                      className={cn(
+                        "w-12 h-6 rounded-full transition-colors relative",
+                        writingConfig.enforceWordCount ? "bg-emerald-500" : "bg-zinc-700"
+                      )}
+                    >
+                      <div className={cn(
+                        "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                        writingConfig.enforceWordCount ? "left-7" : "left-1"
+                      )} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 bg-zinc-800/30 rounded-xl border border-zinc-700/50">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-emerald-500/10 rounded-lg flex items-center justify-center text-emerald-500">
+                        <FileText size={20} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-zinc-200">{t.autoSummarize}</p>
+                        <p className="text-xs text-zinc-500">Automatically generate a concise summary after completing a chapter.</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setWritingConfig({ ...writingConfig, autoSummarize: !writingConfig.autoSummarize })}
+                      className={cn(
+                        "w-12 h-6 rounded-full transition-colors relative",
+                        writingConfig.autoSummarize ? "bg-emerald-500" : "bg-zinc-700"
+                      )}
+                    >
+                      <div className={cn(
+                        "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                        writingConfig.autoSummarize ? "left-7" : "left-1"
+                      )} />
+                    </button>
                   </div>
 
                   <div className="space-y-4">
@@ -2168,9 +2411,13 @@ export default function App() {
                   <div className="pt-4">
                     <button
                       onClick={() => {
-                        localStorage.setItem("inkflow_ai_config", JSON.stringify(aiConfig));
-                        localStorage.setItem("inkflow_writing_config", JSON.stringify(writingConfig));
-                        alert(t.settingsSaved);
+                        try {
+                          localStorage.setItem("inkflow_ai_config", JSON.stringify(aiConfig));
+                          localStorage.setItem("inkflow_writing_config", JSON.stringify(writingConfig));
+                          setToast({ message: t.settingsSaved || "Settings saved", type: 'success' });
+                        } catch (e) {
+                          setToast({ message: "Failed to save settings", type: 'error' });
+                        }
                       }}
                       className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20"
                     >
@@ -2183,6 +2430,37 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+      <AnimatePresence>
+        {toast && (
+          <Toast 
+            message={toast.message} 
+            type={toast.type} 
+            onClose={() => setToast(null)} 
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+const Toast = ({ message, type, onClose }: any) => (
+  <motion.div
+    initial={{ opacity: 0, y: 50 }}
+    animate={{ opacity: 1, y: 0 }}
+    exit={{ opacity: 0, y: 50 }}
+    className={cn(
+      "fixed bottom-12 left-1/2 -translate-x-1/2 z-[100] px-8 py-4 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex items-center gap-4 border backdrop-blur-xl",
+      type === 'success' 
+        ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" 
+        : "bg-rose-500/20 border-rose-500/40 text-rose-300"
+    )}
+  >
+    <div className={cn(
+      "w-8 h-8 rounded-full flex items-center justify-center",
+      type === 'success' ? "bg-emerald-500/20" : "bg-rose-500/20"
+    )}>
+      {type === 'success' ? <Sparkles size={20} /> : <X size={20} className="cursor-pointer" onClick={onClose} />}
+    </div>
+    <span className="text-base font-semibold tracking-wide">{message}</span>
+  </motion.div>
+);

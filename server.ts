@@ -69,6 +69,7 @@ try { db.prepare("ALTER TABLE novels ADD COLUMN storylines TEXT").run(); } catch
 try { db.prepare("ALTER TABLE novels ADD COLUMN world_setting TEXT").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE novels ADD COLUMN cover_url TEXT").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE novels ADD COLUMN relationships TEXT").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE chapters ADD COLUMN summary TEXT").run(); } catch (e) {}
 
 async function startServer() {
   const app = express();

@@ -21,7 +21,9 @@ export async function generateAIContent(
     layoutInstruction = "Use standard novel formatting with balanced paragraph lengths and natural flow.";
   }
 
-  const wordCountInstruction = `The content should be between ${writingConfig.minWords} and ${writingConfig.maxWords} words.`;
+  const wordCountInstruction = writingConfig.enforceWordCount 
+    ? `The content should be between ${writingConfig.minWords} and ${writingConfig.maxWords} words.`
+    : "Follow the length requirements specified in the context or outline, if any. Otherwise, write a standard length chapter.";
 
   const fullPrompt = `You are a creative novel writer. ${langInstruction}\n\n${layoutInstruction}\n${wordCountInstruction}\n\nContext: ${context}\n\nTask: ${prompt}`;
 
@@ -128,7 +130,9 @@ export async function* generateAIContentStream(
     layoutInstruction = "Use standard novel formatting with balanced paragraph lengths and natural flow.";
   }
 
-  const wordCountInstruction = `The content should be between ${writingConfig.minWords} and ${writingConfig.maxWords} words.`;
+  const wordCountInstruction = writingConfig.enforceWordCount 
+    ? `The content should be between ${writingConfig.minWords} and ${writingConfig.maxWords} words.`
+    : "Follow the length requirements specified in the context or outline, if any. Otherwise, write a standard length chapter.";
   const fullPrompt = `You are a creative novel writer. ${langInstruction}\n\n${layoutInstruction}\n${wordCountInstruction}\n\nContext: ${context}\n\nTask: ${prompt}\n\nIMPORTANT: Output ONLY the novel content text. Do not use JSON. Do not include titles or meta-talk.`;
 
   if (config.provider === 'gemini') {
@@ -238,7 +242,7 @@ export async function generateAIOutline(title: string, genre: string, config: AI
 
 export async function generateChapterTitle(content: string, config: AIConfig, language: string = 'en') {
   const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
-  const fullPrompt = `Based on the following novel chapter content, generate a concise and fitting chapter title. ${langInstruction}\n\nContent: ${content.slice(0, 2000)}\n\nTask: Output ONLY the title text. No quotes, no 'Chapter X', just the title.`;
+  const fullPrompt = `Based on the following novel chapter content, generate a concise and fitting chapter title. ${langInstruction}\n\nContent: ${content.slice(0, 2000)}\n\nTask: Output ONLY the title text. No quotes, no 'Chapter X', no leading dashes or dots, just the title.`;
 
   if (config.provider === 'gemini') {
     const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
@@ -276,6 +280,43 @@ export async function generateChapterTitle(content: string, config: AIConfig, la
   }
 }
 
+export async function generateChapterSummary(content: string, config: AIConfig, language: string = 'en') {
+  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
+  const fullPrompt = `Summarize the following novel chapter into a concise summary (max 200 words). Focus on character development, plot progress, and world-building details. ${langInstruction}\n\nContent: ${content}\n\nTask: Output ONLY the summary text.`;
+
+  if (config.provider === 'gemini') {
+    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+    try {
+      const response = await ai.models.generateContent({
+        model: config.model || "gemini-3-flash-preview",
+        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+        config: { temperature: 0.5 }
+      });
+      return response.text?.trim() || "";
+    } catch (error) {
+      console.error("Gemini Summary Error:", error);
+      return "";
+    }
+  } else {
+    const openai = new OpenAI({
+      apiKey: config.apiKey || "",
+      baseURL: config.baseUrl || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      dangerouslyAllowBrowser: true
+    });
+    try {
+      const response = await openai.chat.completions.create({
+        model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : "")),
+        messages: [{ role: "user", content: fullPrompt }],
+        temperature: 0.5,
+      });
+      return response.choices[0].message.content?.trim() || "";
+    } catch (error) {
+      console.error(`${config.provider} Summary Error:`, error);
+      return "";
+    }
+  }
+}
+
 export async function extractNovelMetadata(
   chapters: Chapter[], 
   currentMetadata: { characters: string, storylines: string, world_setting: string, relationships: string },
@@ -283,10 +324,13 @@ export async function extractNovelMetadata(
   language: string = 'en'
 ) {
   const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
-  const recentChapters = chapters.slice(-10);
-  const chaptersContent = recentChapters.map(c => `Chapter ${c.title}:\n${c.content.slice(0, 1000)}`).join("\n\n");
+  const recentChapters = chapters.slice(-15);
+  const chaptersContent = recentChapters.map(c => {
+    const content = c.summary || c.content.slice(0, 500);
+    return `Chapter ${c.title} (${c.summary ? 'Summary' : 'Excerpt'}):\n${content}`;
+  }).join("\n\n");
   
-  const fullPrompt = `You are a creative editor. Based on the provided chapter excerpts, extract and update the novel's metadata. 
+  const fullPrompt = `You are a creative editor. Based on the provided chapter summaries or excerpts, extract and update the novel's metadata. 
   ${langInstruction}
   
   Current Metadata:
@@ -295,7 +339,7 @@ export async function extractNovelMetadata(
   World Setting: ${currentMetadata.world_setting}
   Relationships: ${currentMetadata.relationships}
   
-  Recent Chapter Excerpts:
+  Recent Chapter Info:
   ${chaptersContent}
   
   Task: Analyze the chapters and update the metadata. 
@@ -357,6 +401,55 @@ export async function extractNovelMetadata(
     } catch (error) {
       console.error(`${config.provider} Metadata Extraction Error:`, error);
       throw error;
+    }
+  }
+}
+
+export async function refactorWorldSetting(content: string, config: AIConfig, language: string = 'en') {
+  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
+  const fullPrompt = `Refactor the following novel world setting content into a more structured markdown format. 
+  ${langInstruction}
+  
+  Use bullet points and clear headings for:
+  - Geography & Environment
+  - Magic Systems / Power Systems
+  - History & Background
+  - Social Rules & Politics
+  - Other relevant aspects
+  
+  Content: ${content}
+  
+  Task: Output ONLY the refactored markdown text.`;
+
+  if (config.provider === 'gemini') {
+    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+    try {
+      const response = await ai.models.generateContent({
+        model: config.model || "gemini-3-flash-preview",
+        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+        config: { temperature: 0.5 }
+      });
+      return response.text?.trim() || content;
+    } catch (error) {
+      console.error("Gemini Refactor Error:", error);
+      return content;
+    }
+  } else {
+    const openai = new OpenAI({
+      apiKey: config.apiKey || "",
+      baseURL: config.baseUrl || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      dangerouslyAllowBrowser: true
+    });
+    try {
+      const response = await openai.chat.completions.create({
+        model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : "")),
+        messages: [{ role: "user", content: fullPrompt }],
+        temperature: 0.5,
+      });
+      return response.choices[0].message.content?.trim() || content;
+    } catch (error) {
+      console.error(`${config.provider} Refactor Error:`, error);
+      return content;
     }
   }
 }

@@ -33,6 +33,7 @@ export interface Chapter {
   content: string;
   word_count: number;
   order_index?: number;
+  summary?: string;
   status: string;
   scheduled_at: string | null;
   published_at: string | null;
@@ -61,4 +62,6 @@ export interface WritingConfig {
   minWords: number;
   maxWords: number;
   layout: ContentLayout;
+  enforceWordCount: boolean;
+  autoSummarize: boolean;
 }
