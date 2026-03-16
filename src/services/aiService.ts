@@ -324,10 +324,28 @@ export async function extractNovelMetadata(
   language: string = 'en'
 ) {
   const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
-  const recentChapters = chapters.slice(-15);
-  const chaptersContent = recentChapters.map(c => {
-    const content = c.summary || c.content.slice(0, 500);
-    return `Chapter ${c.title} (${c.summary ? 'Summary' : 'Excerpt'}):\n${content}`;
+  
+  // Optimization: Smarter sampling for large novels
+  let selectedChapters: Chapter[] = [];
+  if (chapters.length <= 20) {
+    selectedChapters = chapters;
+  } else {
+    // Take first 3 (origin), 2 from middle (transition), and last 15 (current context)
+    const firstThree = chapters.slice(0, 3);
+    const middleIdx = Math.floor(chapters.length / 2);
+    const middleTwo = chapters.slice(middleIdx - 1, middleIdx + 1);
+    const lastFifteen = chapters.slice(-15);
+    
+    // Use a Set to avoid duplicates if indices overlap
+    const selectedSet = new Set([...firstThree, ...middleTwo, ...lastFifteen]);
+    selectedChapters = Array.from(selectedSet).sort((a, b) => 
+      chapters.indexOf(a) - chapters.indexOf(b)
+    );
+  }
+
+  const chaptersContent = selectedChapters.map(c => {
+    const content = c.summary || c.content.slice(0, 600);
+    return `Chapter ${c.title} (Index: ${chapters.indexOf(c) + 1}, ${c.summary ? 'Summary' : 'Excerpt'}):\n${content}`;
   }).join("\n\n");
   
   const fullPrompt = `You are a creative editor. Based on the provided chapter summaries or excerpts, extract and update the novel's metadata. 

@@ -43,7 +43,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
 import { cn } from "./lib/utils";
-import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout } from "./types";
+import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout, Platform, ScheduledTask } from "./types";
 import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, extractNovelMetadata, generateChapterSummary, refactorWorldSetting } from "./services/aiService";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -99,6 +99,75 @@ const StatCard = ({ label, value, icon: Icon, trend, t }: any) => (
   </Card>
 );
 
+const StructuredContent = ({ content, placeholder }: { content: string, placeholder: string }) => {
+  if (!content) return <p className="text-zinc-500 italic text-sm">{placeholder}</p>;
+
+  try {
+    const data = JSON.parse(content);
+    
+    // Handle Array (likely Characters)
+    if (Array.isArray(data)) {
+      return (
+        <div className="space-y-4">
+          {data.map((item: any, idx: number) => (
+            <div key={idx} className="p-4 bg-zinc-800/50 rounded-xl border border-zinc-700/50 hover:border-emerald-500/30 transition-all">
+              {Object.entries(item).map(([key, value]: [string, any]) => (
+                <div key={key} className="mb-2 last:mb-0">
+                  <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider block mb-1">{key}</span>
+                  <p className="text-sm text-zinc-300 leading-relaxed">
+                    {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // Handle Object (World Setting, Storylines)
+    if (typeof data === 'object' && data !== null) {
+      return (
+        <div className="space-y-6">
+          {Object.entries(data).map(([key, value]: [string, any]) => (
+            <div key={key}>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-1 h-4 bg-emerald-500 rounded-full" />
+                <h5 className="text-xs font-bold text-white uppercase tracking-widest">{key.replace(/_/g, ' ')}</h5>
+              </div>
+              <div className="pl-3 border-l border-zinc-800 ml-0.5">
+                {Array.isArray(value) ? (
+                  <ul className="list-disc list-inside space-y-1">
+                    {value.map((v: any, i: number) => (
+                      <li key={i} className="text-sm text-zinc-400 leading-relaxed">
+                        {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-zinc-400 leading-relaxed">
+                    {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+  } catch (e) {
+    // Not JSON, fallback to Markdown
+  }
+
+  return (
+    <div className="prose prose-invert prose-sm max-w-none markdown-body">
+      <Markdown remarkPlugins={[remarkGfm]}>
+        {content || `*${placeholder}*`}
+      </Markdown>
+    </div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
@@ -129,6 +198,11 @@ export default function App() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [tasks, setTasks] = useState<ScheduledTask[]>([]);
+  const [platforms, setPlatforms] = useState<Platform[]>([]);
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [newTask, setNewTask] = useState<Partial<ScheduledTask>>({ type: 'generate' });
+
   const [batchCount, setBatchCount] = useState(3);
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
@@ -200,6 +274,8 @@ export default function App() {
   useEffect(() => {
     fetchNovels();
     fetchStats();
+    fetchTasks();
+    fetchPlatforms();
   }, []);
 
   const fetchNovels = async () => {
@@ -226,14 +302,43 @@ export default function App() {
     }
   };
 
-  const fetchNovelDetails = async (id: number) => {
+  const fetchTasks = async () => {
+    try {
+      const res = await fetch("/api/tasks");
+      if (!res.ok) throw new Error(t.fetchError || "Failed to fetch tasks");
+      const data = await res.json();
+      setTasks(data);
+    } catch (e: any) {
+      console.error(e);
+    }
+  };
+
+  const fetchPlatforms = async () => {
+    try {
+      const res = await fetch("/api/platforms");
+      if (!res.ok) throw new Error(t.fetchError || "Failed to fetch platforms");
+      const data = await res.json();
+      setPlatforms(data);
+    } catch (e: any) {
+      console.error(e);
+    }
+  };
+
+  const fetchNovelDetails = async (id: number, keepChapterId?: number) => {
     try {
       const res = await fetch(`/api/novels/${id}`);
       if (!res.ok) throw new Error(t.fetchError || "Failed to fetch novel details");
       const data = await res.json();
       setSelectedNovel(data);
       setChapters(data.chapters || []);
-      setCurrentChapter(null);
+      
+      if (keepChapterId) {
+        const updated = data.chapters?.find((c: Chapter) => c.id === keepChapterId);
+        if (updated) setCurrentChapter(updated);
+      } else {
+        setCurrentChapter(null);
+      }
+
       const active = data.outlines?.find((o: OutlineVersion) => o.is_active === 1) || data.outlines?.[0] || null;
       setActiveOutline(active);
       setActiveTab("editor");
@@ -256,7 +361,8 @@ export default function App() {
         setSelectedNovel(updatedNovel);
         setNovels(novels.map(n => n.id === updatedNovel.id ? updatedNovel : n));
       } else {
-        throw new Error(t.saveError || "Failed to save novel details");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || t.saveError || "Failed to save novel details");
       }
     } catch (error: any) {
       console.error("Failed to save novel details:", error);
@@ -343,6 +449,37 @@ export default function App() {
       setIsCreating(false);
     }
   };
+  
+  const handleCreateTask = async () => {
+    if (!newTask.type || !newTask.scheduled_at) return;
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newTask),
+      });
+      if (!res.ok) throw new Error(t.createError || "Failed to create task");
+      setShowTaskModal(false);
+      setNewTask({ type: 'generate' });
+      await fetchTasks();
+      setToast({ message: t.scheduleTask + " " + t.active, type: 'success' });
+    } catch (e: any) {
+      console.error(e);
+      setToast({ message: e.message || "Failed to create task", type: 'error' });
+    }
+  };
+
+  const handleDeleteTask = async (id: number) => {
+    try {
+      const res = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(t.deleteError || "Failed to delete task");
+      await fetchTasks();
+      setToast({ message: t.deleteError + " " + t.active, type: 'success' });
+    } catch (e: any) {
+      console.error(e);
+      setToast({ message: e.message || "Failed to delete task", type: 'error' });
+    }
+  };
 
   const handleGenerateTitle = async () => {
     if (!currentChapter || !currentChapter.content || isGeneratingTitle) return;
@@ -378,11 +515,15 @@ export default function App() {
         body: JSON.stringify({ 
           content: currentChapter.content,
           title: currentChapter.title,
+          summary: currentChapter.summary,
           scheduled_at: scheduledAt || null
         }),
       });
       if (!res.ok) throw new Error(t.saveError || "Failed to save chapter");
-      await fetchNovelDetails(selectedNovel.id);
+      
+      // Update local chapters list
+      setChapters(prev => prev.map(ch => ch.id === currentChapter.id ? { ...ch, ...currentChapter } : ch));
+      
       setLastSavedAt(new Date());
     } catch (error: any) {
       console.error("Error saving chapter:", error);
@@ -474,22 +615,26 @@ export default function App() {
     }
   };
 
-  const handleGenerateSummary = async () => {
-    if (!currentChapter || !selectedNovel || !currentChapter.content) return;
+  const handleGenerateSummary = async (providedContent?: string) => {
+    const contentToSummarize = providedContent || currentChapter?.content;
+    if (!currentChapter || !selectedNovel || !contentToSummarize) return;
     setIsGenerating(true);
     try {
-      const summary = await generateChapterSummary(currentChapter.content, aiConfig, lang);
+      const summary = await generateChapterSummary(contentToSummarize, aiConfig, lang);
       if (summary) {
         setCurrentChapter(prev => prev ? { ...prev, summary } : null);
+        setChapters(prev => prev.map(ch => ch.id === currentChapter.id ? { ...ch, summary } : ch));
+        
         const res = await fetch(`/api/chapters/${currentChapter.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ summary }),
         });
+        
         if (!res.ok) throw new Error(t.saveError || "Failed to save summary");
-        // Refresh novel details to update the list
-        await fetchNovelDetails(selectedNovel.id);
         setToast({ message: t.summarize + " " + t.active, type: 'success' });
+      } else {
+        setToast({ message: "AI returned an empty summary. Please try again.", type: 'error' });
       }
     } catch (error: any) {
       console.error("Error generating summary:", error);
@@ -537,7 +682,9 @@ export default function App() {
       
       fetchStats();
       if (writingConfig.autoSummarize) {
-        handleGenerateSummary();
+        handleGenerateSummary(finalContent);
+      } else {
+        await fetchNovelDetails(selectedNovel.id, currentChapter.id);
       }
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -609,7 +756,9 @@ export default function App() {
       });
       fetchStats();
       if (writingConfig.autoSummarize) {
-        handleGenerateSummary();
+        handleGenerateSummary(currentContent);
+      } else {
+        await fetchNovelDetails(selectedNovel.id, currentChapter.id);
       }
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -728,10 +877,20 @@ export default function App() {
   const handleBatchGenerate = async () => {
     if (!selectedNovel || isBatchGenerating) return;
     
+    const targetChapters = selectedNovel.target_chapters || 50;
+    const remainingChapters = Math.max(0, targetChapters - chapters.length);
+    const actualBatchCount = Math.min(batchCount, remainingChapters);
+    
+    if (actualBatchCount <= 0) {
+      setToast({ message: "Already reached target chapter count", type: 'success' });
+      setShowBatchModal(false);
+      return;
+    }
+
     const controller = new AbortController();
     setAbortController(controller);
     setIsBatchGenerating(true);
-    setBatchProgress({ current: 0, total: batchCount });
+    setBatchProgress({ current: 0, total: actualBatchCount });
     setShowBatchModal(false);
     
     // Switch to novels tab to show the writing area
@@ -739,9 +898,8 @@ export default function App() {
     
     try {
       const activeOutlineContent = selectedNovel.outlines?.find(o => o.is_active === 1)?.content || "";
-      const targetChapters = selectedNovel.target_chapters || 50;
       
-      for (let i = 0; i < batchCount; i++) {
+      for (let i = 0; i < actualBatchCount; i++) {
         if (controller.signal.aborted) break;
         
         setBatchProgress(prev => ({ ...prev, current: i + 1 }));
@@ -863,6 +1021,12 @@ export default function App() {
             label={t.statistics} 
             active={activeTab === "stats"} 
             onClick={() => setActiveTab("stats")} 
+          />
+          <SidebarItem 
+            icon={Calendar} 
+            label={t.scheduledTasks} 
+            active={activeTab === "tasks"} 
+            onClick={() => setActiveTab("tasks")} 
           />
           <SidebarItem 
             icon={Settings} 
@@ -1041,8 +1205,13 @@ export default function App() {
             >
               <h3 className="text-2xl font-bold text-white mb-6">{t.batchGenerate}</h3>
               <div className="space-y-4 mb-8">
-                <label className="block text-sm text-zinc-500 mb-2">{t.generateCount}</label>
-                <div className="flex gap-4">
+                <label className="block text-sm text-zinc-500 mb-2">
+                  {t.generateCount} 
+                  <span className="ml-2 text-[10px] text-zinc-600 uppercase font-bold">
+                    (Max: {Math.max(0, (selectedNovel.target_chapters || 50) - chapters.length)})
+                  </span>
+                </label>
+                <div className="flex gap-4 mb-4">
                   {[1, 3, 5, 10].map(n => (
                     <button
                       key={n}
@@ -1055,6 +1224,20 @@ export default function App() {
                       {n}
                     </button>
                   ))}
+                </div>
+                <div className="relative">
+                  <input 
+                    type="number"
+                    value={batchCount}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value) || 0;
+                      const max = Math.max(0, (selectedNovel.target_chapters || 50) - chapters.length);
+                      setBatchCount(Math.min(val, max));
+                    }}
+                    min={1}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                    placeholder="Custom count..."
+                  />
                 </div>
               </div>
               <div className="flex gap-3">
@@ -1451,7 +1634,10 @@ export default function App() {
                             <span className="truncate font-medium">{ch.title}</span>
                             {ch.status === 'published' && <Clock size={12} className="text-emerald-500" />}
                           </div>
-                          <p className="text-[10px] text-zinc-600 mt-1">{ch.word_count} {t.words}</p>
+                          <p className="text-[10px] text-zinc-600 mt-1 flex items-center justify-between">
+                            <span>{ch.word_count} {t.words}</span>
+                            {ch.summary && <span className="text-[9px] text-emerald-500/60 italic truncate ml-2 max-w-[80px]">{ch.summary}</span>}
+                          </p>
                           
                           <button
                             onClick={(e) => handleDeleteChapter(e, ch.id)}
@@ -1543,15 +1729,27 @@ export default function App() {
                             </span>
                           </div>
                         </div>
-                        {currentChapter.summary && (
+                        {(currentChapter.summary || isGenerating) && (
                           <div className="mx-8 mt-4 p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-xl">
-                            <div className="flex items-center gap-2 mb-2">
-                              <FileText size={14} className="text-emerald-500" />
-                              <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">{t.summary}</span>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <FileText size={14} className="text-emerald-500" />
+                                <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">{t.summary}</span>
+                              </div>
+                              <button 
+                                onClick={() => setCurrentChapter({...currentChapter, summary: null})}
+                                className="text-[10px] text-zinc-500 hover:text-rose-400 transition-colors"
+                              >
+                                {t.clear}
+                              </button>
                             </div>
-                            <p className="text-xs text-zinc-400 leading-relaxed italic">
-                              {currentChapter.summary}
-                            </p>
+                            <textarea
+                              value={currentChapter.summary || ""}
+                              onChange={(e) => setCurrentChapter({...currentChapter, summary: e.target.value})}
+                              placeholder={isGenerating ? "AI is summarizing..." : t.summarize + "..."}
+                              className="w-full bg-transparent text-xs text-zinc-400 leading-relaxed italic resize-none focus:outline-none"
+                              rows={2}
+                            />
                           </div>
                         )}
                         <textarea
@@ -1577,7 +1775,7 @@ export default function App() {
                             </button>
 
                             <button 
-                              onClick={handleGenerateSummary}
+                              onClick={() => handleGenerateSummary()}
                               disabled={isGenerating || isSegmenting || !currentChapter.content}
                               className="px-4 py-2 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-400 border border-zinc-700/50 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50 whitespace-nowrap"
                               title={t.summarize}
@@ -1918,11 +2116,10 @@ export default function App() {
                               className="w-full h-full bg-transparent border-none text-white focus:outline-none resize-none text-sm leading-relaxed font-mono"
                             />
                           ) : (
-                            <div className="prose prose-invert prose-sm max-w-none markdown-body">
-                              <Markdown remarkPlugins={[remarkGfm]}>
-                                {selectedNovel.world_setting || `*${t.worldSettingPlaceholder}*`}
-                              </Markdown>
-                            </div>
+                            <StructuredContent 
+                              content={selectedNovel.world_setting || ""} 
+                              placeholder={t.worldSettingPlaceholder} 
+                            />
                           )}
                         </div>
                       </div>
@@ -1961,11 +2158,10 @@ export default function App() {
                               className="w-full h-full bg-transparent border-none text-white focus:outline-none resize-none text-sm leading-relaxed"
                             />
                           ) : (
-                            <div className="prose prose-invert prose-sm max-w-none markdown-body">
-                              <Markdown remarkPlugins={[remarkGfm]}>
-                                {selectedNovel.characters || `*${t.charactersPlaceholder}*`}
-                              </Markdown>
-                            </div>
+                            <StructuredContent 
+                              content={selectedNovel.characters || ""} 
+                              placeholder={t.charactersPlaceholder} 
+                            />
                           )}
                         </div>
                       </div>
@@ -2002,11 +2198,10 @@ export default function App() {
                               className="w-full h-full bg-transparent border-none text-white focus:outline-none resize-none text-sm leading-relaxed"
                             />
                           ) : (
-                            <div className="prose prose-invert prose-sm max-w-none markdown-body">
-                              <Markdown remarkPlugins={[remarkGfm]}>
-                                {selectedNovel.storylines || `*${t.storylinesPlaceholder}*`}
-                              </Markdown>
-                            </div>
+                            <StructuredContent 
+                              content={selectedNovel.storylines || ""} 
+                              placeholder={t.storylinesPlaceholder} 
+                            />
                           )}
                         </div>
                       </div>
@@ -2045,11 +2240,10 @@ export default function App() {
                               className="w-full h-full bg-transparent border-none text-white focus:outline-none resize-none text-sm leading-relaxed"
                             />
                           ) : (
-                            <div className="prose prose-invert prose-sm max-w-none markdown-body">
-                              <Markdown remarkPlugins={[remarkGfm]}>
-                                {selectedNovel.relationships || `*${t.relationshipsPlaceholder}*`}
-                              </Markdown>
-                            </div>
+                            <StructuredContent 
+                              content={selectedNovel.relationships || ""} 
+                              placeholder={t.relationshipsPlaceholder} 
+                            />
                           )}
                         </div>
                       </div>
@@ -2182,6 +2376,125 @@ export default function App() {
                   </table>
                 </div>
               </Card>
+            </motion.div>
+          )}
+
+          {activeTab === "tasks" && (
+            <motion.div
+              key="tasks"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="space-y-8"
+            >
+              <header className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-3xl font-bold text-white mb-2">{t.scheduledTasks}</h2>
+                  <p className="text-zinc-500">Manage your automated generation and publishing tasks.</p>
+                </div>
+                <button 
+                  onClick={() => setShowTaskModal(true)}
+                  className="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl flex items-center gap-2 transition-all"
+                >
+                  <Plus size={20} />
+                  {t.scheduleTask}
+                </button>
+              </header>
+
+              <div className="grid grid-cols-1 gap-6">
+                <Card title={t.scheduledTasks}>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
+                          <th className="px-4 py-3 font-bold">{t.taskType}</th>
+                          <th className="px-4 py-3 font-bold">{t.novel}</th>
+                          <th className="px-4 py-3 font-bold">{t.scheduleTime}</th>
+                          <th className="px-4 py-3 font-bold">{t.taskStatus}</th>
+                          <th className="px-4 py-3 font-bold text-right">{t.active}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800">
+                        {tasks.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-8 text-center text-zinc-500 italic">
+                              {t.noTasks}
+                            </td>
+                          </tr>
+                        ) : (
+                          tasks.map(task => (
+                            <tr key={task.id} className="text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
+                              <td className="px-4 py-4">
+                                <div className="flex items-center gap-2">
+                                  {task.type === 'generate' ? <Sparkles size={14} className="text-emerald-400" /> : <Send size={14} className="text-blue-400" />}
+                                  <span className="font-medium">
+                                    {task.type === 'generate' ? t.generateChapter : t.publishToPlatform}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <p className="font-medium text-zinc-200">{task.novel_title || '-'}</p>
+                                {task.chapter_title && <p className="text-xs text-zinc-500">{task.chapter_title}</p>}
+                                {task.platform_name && <p className="text-xs text-blue-400/70">{task.platform_name}</p>}
+                              </td>
+                              <td className="px-4 py-4 text-zinc-400">
+                                <div className="flex items-center gap-1.5">
+                                  <Clock size={12} />
+                                  {format(new Date(task.scheduled_at), 'yyyy-MM-dd HH:mm')}
+                                </div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <span className={cn(
+                                  "px-2 py-0.5 text-[10px] rounded-full border",
+                                  task.status === 'pending' && "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
+                                  task.status === 'running' && "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 animate-pulse",
+                                  task.status === 'completed' && "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+                                  task.status === 'failed' && "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                                )}>
+                                  {t[task.status]}
+                                </span>
+                                {task.error && <p className="text-[10px] text-rose-400 mt-1 max-w-[200px] truncate" title={task.error}>{task.error}</p>}
+                              </td>
+                              <td className="px-4 py-4 text-right">
+                                <button 
+                                  onClick={() => handleDeleteTask(task.id)}
+                                  className="p-2 text-zinc-500 hover:text-rose-400 transition-colors"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+
+                <Card title={t.platforms}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {platforms.map(platform => (
+                      <div key={platform.id} className="p-4 bg-zinc-800/50 border border-zinc-700 rounded-xl flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-zinc-700 rounded-lg flex items-center justify-center text-emerald-400">
+                            <Globe size={20} />
+                          </div>
+                          <div>
+                            <p className="font-bold text-zinc-100">{platform.name}</p>
+                            <p className="text-xs text-zinc-500 uppercase tracking-wider">{platform.type}</p>
+                          </div>
+                        </div>
+                        <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] rounded-full border border-emerald-500/20">
+                          {t.active}
+                        </span>
+                      </div>
+                    ))}
+                    <button className="p-4 border-2 border-dashed border-zinc-800 rounded-xl flex items-center justify-center gap-2 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300 transition-all">
+                      <Plus size={20} />
+                      {t.addPlatform}
+                    </button>
+                  </div>
+                </Card>
+              </div>
             </motion.div>
           )}
 
@@ -2430,6 +2743,124 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+      {/* Task Creation Modal */}
+      <AnimatePresence>
+        {showTaskModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl"
+            >
+              <h3 className="text-2xl font-bold text-white mb-6">{t.scheduleTask}</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-2">{t.taskType}</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button 
+                      onClick={() => setNewTask({ ...newTask, type: 'generate' })}
+                      className={cn(
+                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
+                        newTask.type === 'generate' 
+                          ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" 
+                          : "bg-zinc-800/50 border-zinc-700 text-zinc-500 hover:border-zinc-600"
+                      )}
+                    >
+                      <Sparkles size={16} />
+                      {t.generateChapter}
+                    </button>
+                    <button 
+                      onClick={() => setNewTask({ ...newTask, type: 'publish' })}
+                      className={cn(
+                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
+                        newTask.type === 'publish' 
+                          ? "bg-blue-500/10 border-blue-500/50 text-blue-400" 
+                          : "bg-zinc-800/50 border-zinc-700 text-zinc-500 hover:border-zinc-600"
+                      )}
+                    >
+                      <Send size={16} />
+                      {t.publishToPlatform}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-2">{t.novel}</label>
+                  <select 
+                    value={newTask.novel_id || ""}
+                    onChange={(e) => setNewTask({ ...newTask, novel_id: parseInt(e.target.value) })}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                  >
+                    <option value="">{t.selectNovel}</option>
+                    {novels.map(n => (
+                      <option key={n.id} value={n.id}>{n.title}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {newTask.type === 'publish' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-400 mb-2">{t.chapters}</label>
+                      <select 
+                        value={newTask.chapter_id || ""}
+                        onChange={(e) => setNewTask({ ...newTask, chapter_id: parseInt(e.target.value) })}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                      >
+                        <option value="">{t.selectChapter}</option>
+                        {chapters.map(c => (
+                          <option key={c.id} value={c.id}>{c.title}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-400 mb-2">{t.selectPlatform}</label>
+                      <select 
+                        value={newTask.platform_id || ""}
+                        onChange={(e) => setNewTask({ ...newTask, platform_id: parseInt(e.target.value) })}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                      >
+                        <option value="">{t.selectPlatform}</option>
+                        {platforms.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-2">{t.scheduleTime}</label>
+                  <input 
+                    type="datetime-local"
+                    value={newTask.scheduled_at || ""}
+                    onChange={(e) => setNewTask({ ...newTask, scheduled_at: e.target.value })}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                  />
+                </div>
+
+                <div className="flex gap-4 mt-8">
+                  <button 
+                    onClick={() => setShowTaskModal(false)}
+                    className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
+                  >
+                    {t.cancel}
+                  </button>
+                  <button 
+                    onClick={handleCreateTask}
+                    disabled={!newTask.novel_id || !newTask.scheduled_at || (newTask.type === 'publish' && (!newTask.chapter_id || !newTask.platform_id))}
+                    className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-black font-bold rounded-xl transition-all"
+                  >
+                    {t.confirm}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {toast && (
           <Toast 

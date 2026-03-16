@@ -65,3 +65,26 @@ export interface WritingConfig {
   enforceWordCount: boolean;
   autoSummarize: boolean;
 }
+
+export interface Platform {
+  id: number;
+  name: string;
+  type: string;
+  config: string; // JSON string
+  created_at: string;
+}
+
+export interface ScheduledTask {
+  id: number;
+  type: 'generate' | 'publish';
+  novel_id?: number;
+  chapter_id?: number;
+  platform_id?: number;
+  scheduled_at: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  error?: string;
+  created_at: string;
+  novel_title?: string;
+  chapter_title?: string;
+  platform_name?: string;
+}
