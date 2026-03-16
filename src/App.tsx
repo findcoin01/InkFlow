@@ -629,9 +629,9 @@ export default function App() {
     if (!outlineContent) return "";
     const lines = outlineContent.split('\n');
     const chapterPatterns = [
-      new RegExp(`(?:Chapter|第)\\s*${chapterNum}\\s*(?:[:：]|章)?\\s*(.+)`, 'i'),
-      new RegExp(`^${chapterNum}\\.\\s*(.+)`),
-      new RegExp(`^${chapterNum}[\\s：:](.+)`)
+      new RegExp(`(?:Chapter|第)\\s*${chapterNum}(?!\\d|[-~])\\s*(?:[:：]|章|\\s|[\\)\\]）］])*\\s*(.+)`, 'i'),
+      new RegExp(`^${chapterNum}(?!\\d|[-~])\\.\\s*(.+)`),
+      new RegExp(`^${chapterNum}(?!\\d|[-~])[\\s：:](.+)`)
     ];
     
     for (const line of lines) {
