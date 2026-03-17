@@ -10,6 +10,7 @@ import {
   Calendar, 
   Sparkles,
   ChevronRight,
+  ChevronDown,
   Clock,
   Eye,
   TrendingUp,
@@ -24,7 +25,10 @@ import {
   Network,
   Globe,
   FileText,
-  Type
+  Type,
+  Cpu,
+  Zap,
+  Activity
 } from "lucide-react";
 import { 
   LineChart, 
@@ -43,7 +47,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
 import { cn } from "./lib/utils";
-import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout, Platform, ScheduledTask } from "./types";
+import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout, Platform, ScheduledTask, Prompt, OperationLog, AIConfigDetail } from "./types";
 import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, extractNovelMetadata, generateChapterSummary, refactorWorldSetting } from "./services/aiService";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -51,18 +55,20 @@ import { translations, Language } from "./constants";
 
 // --- Components ---
 
-const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
+const SidebarItem = ({ icon: Icon, label, active, onClick, collapsed }: any) => (
   <button
     onClick={onClick}
+    title={collapsed ? label : ""}
     className={cn(
       "flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-200",
       active 
         ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
-        : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+        : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200",
+      collapsed && "justify-center px-0"
     )}
   >
-    <Icon size={20} />
-    <span className="font-medium">{label}</span>
+    <Icon size={20} className="shrink-0" />
+    {!collapsed && <span className="font-medium truncate">{label}</span>}
   </button>
 );
 
@@ -168,10 +174,110 @@ const StructuredContent = ({ content, placeholder }: { content: string, placehol
   );
 };
 
+const TemplateSelector = ({ 
+  type, 
+  prompts, 
+  selectedId, 
+  onSelect, 
+  onDelete,
+  t 
+}: { 
+  type: string, 
+  prompts: any[], 
+  selectedId?: number, 
+  onSelect: (id: number) => void,
+  onDelete: (id: number) => void,
+  t: any 
+}) => {
+  const filtered = prompts.filter(p => p.type === type);
+  const activePrompt = filtered.find(p => p.id === selectedId) || filtered.find(p => p.is_default === 1);
+
+  const getTypeIcon = () => {
+    switch(type) {
+      case 'chapter': return <BookOpen size={12} />;
+      case 'outline': return <GitBranch size={12} />;
+      case 'summary': return <FileText size={12} />;
+      case 'refactor': return <Zap size={12} />;
+      default: return <Sparkles size={12} />;
+    }
+  };
+
+  return (
+    <div className="relative group/template">
+      <div className="flex items-center gap-1.5 px-2 py-1.5 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/30 rounded-lg transition-all cursor-pointer group-hover/template:border-zinc-600">
+        <div className="text-emerald-500/60 group-hover/template:text-emerald-400 transition-colors">
+          {getTypeIcon()}
+        </div>
+        <ChevronDown size={10} className="text-zinc-600 group-hover/template:text-zinc-400 transition-colors" />
+      </div>
+      
+      <div className="absolute bottom-full left-0 mb-2 w-64 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl opacity-0 invisible group-hover/template:opacity-100 group-hover/template:visible transition-all z-50 overflow-hidden translate-y-2 group-hover/template:translate-y-0">
+        <div className="p-3 border-b border-zinc-800 bg-zinc-900/80 backdrop-blur-md flex items-center justify-between">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">{t.prompts}</span>
+          <div className="px-1.5 py-0.5 bg-zinc-800 rounded text-[9px] text-zinc-500 font-mono">
+            {filtered.length}
+          </div>
+        </div>
+        <div className="max-h-64 overflow-y-auto py-2">
+          {filtered.length > 0 ? (
+            filtered.map(p => (
+              <div 
+                key={p.id}
+                className={cn(
+                  "flex items-center justify-between px-4 py-2.5 text-xs transition-all hover:bg-zinc-800/80 cursor-pointer group/item",
+                  (selectedId === p.id || (!selectedId && p.is_default === 1)) ? "text-emerald-400 bg-emerald-500/5" : "text-zinc-400 hover:text-zinc-200"
+                )}
+                onClick={() => onSelect(p.id)}
+              >
+                <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-medium">{p.name}</span>
+                    {p.is_default === 1 && (
+                      <span className="text-[8px] px-1 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 uppercase">Default</span>
+                    )}
+                  </div>
+                  <span className="text-[9px] text-zinc-600 truncate opacity-0 group-hover/item:opacity-100 transition-opacity">
+                    {p.content.substring(0, 40)}...
+                  </span>
+                </div>
+                {p.is_default !== 1 && (
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(p.id);
+                    }}
+                    className="p-1.5 text-zinc-600 hover:text-rose-500 hover:bg-rose-500/10 rounded-md opacity-0 group-hover/item:opacity-100 transition-all ml-2"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="px-4 py-8 text-center">
+              <p className="text-[10px] text-zinc-600 uppercase tracking-widest">No templates found</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [promptFilter, setPromptFilter] = useState<string>("all");
+  const [selectedTemplates, setSelectedTemplates] = useState<Record<string, number>>({});
+  const [logs, setLogs] = useState<OperationLog[]>([]);
+  const [aiConfigs, setAiConfigs] = useState<AIConfigDetail[]>([]);
+  const [activeProvider, setActiveProvider] = useState<AIProvider>('gemini');
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
 
   const [activeTab, setActiveTab] = useState("dashboard");
   const [novels, setNovels] = useState<Novel[]>([]);
@@ -184,6 +290,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [isSegmenting, setIsSegmenting] = useState(false);
+  const [isPolishing, setIsPolishing] = useState(false);
   const [segmentProgress, setSegmentProgress] = useState(0);
   const [isGeneratingOutline, setIsGeneratingOutline] = useState(false);
   const [isSupplementing, setIsSupplementing] = useState(false);
@@ -199,7 +306,6 @@ export default function App() {
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
-  const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [newTask, setNewTask] = useState<Partial<ScheduledTask>>({ type: 'generate' });
 
@@ -263,6 +369,9 @@ export default function App() {
   const [lang, setLang] = useState<Language>('zh');
   const t = translations[lang];
 
+  const [showPromptModal, setShowPromptModal] = useState(false);
+  const [editingPrompt, setEditingPrompt] = useState<Partial<Prompt> | null>(null);
+
   useEffect(() => {
     localStorage.setItem("inkflow_ai_config", JSON.stringify(aiConfig));
   }, [aiConfig]);
@@ -275,7 +384,9 @@ export default function App() {
     fetchNovels();
     fetchStats();
     fetchTasks();
-    fetchPlatforms();
+    fetchPrompts();
+    fetchLogs();
+    fetchAIConfigs();
   }, []);
 
   const fetchNovels = async () => {
@@ -313,15 +424,96 @@ export default function App() {
     }
   };
 
-  const fetchPlatforms = async () => {
+  const fetchPrompts = async () => {
     try {
-      const res = await fetch("/api/platforms");
-      if (!res.ok) throw new Error(t.fetchError || "Failed to fetch platforms");
-      const data = await res.json();
-      setPlatforms(data);
-    } catch (e: any) {
+      const res = await fetch("/api/prompts");
+      if (res.ok) setPrompts(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const handleSavePrompt = async () => {
+    if (!editingPrompt?.name || !editingPrompt?.content || !editingPrompt?.type) return;
+    
+    try {
+      const isNew = !editingPrompt.id;
+      const url = isNew ? "/api/prompts" : `/api/prompts/${editingPrompt.id}`;
+      const method = isNew ? "POST" : "PATCH";
+      
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editingPrompt),
+      });
+      
+      if (res.ok) {
+        await fetchPrompts();
+        setShowPromptModal(false);
+        setEditingPrompt(null);
+        setToast({ message: isNew ? "提示词已创建" : "提示词已更新", type: 'success' });
+      }
+    } catch (e) {
+      console.error(e);
+      setToast({ message: "保存提示词失败", type: 'error' });
+    }
+  };
+
+  const handleSetDefaultPrompt = async (id: number, type: string) => {
+    try {
+      const res = await fetch(`/api/prompts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_default: 1 }),
+      });
+      
+      if (res.ok) {
+        await fetchPrompts();
+        setToast({ message: "已设为默认提示词", type: 'success' });
+      }
+    } catch (e) {
       console.error(e);
     }
+  };
+
+  const handleDeletePrompt = async (id: number) => {
+    if (!confirm(t.confirmDeletePrompt || "确定要删除这个模板吗？")) return;
+    try {
+      const res = await fetch(`/api/prompts/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        await fetchPrompts();
+        setSelectedTemplates(prev => {
+          const next = { ...prev };
+          Object.keys(next).forEach(key => {
+            if (next[key] === id) delete next[key];
+          });
+          return next;
+        });
+        setToast({ message: t.promptDeleted || "模板已删除", type: 'success' });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchLogs = async () => {
+    try {
+      const res = await fetch("/api/logs");
+      if (res.ok) setLogs(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const getActivePrompt = (type: string) => {
+    const selectedId = selectedTemplates[type];
+    if (selectedId) {
+      return prompts.find(p => p.id === selectedId)?.content;
+    }
+    return prompts.find(p => p.type === type && p.is_default === 1)?.content;
+  };
+
+  const fetchAIConfigs = async () => {
+    try {
+      const res = await fetch("/api/ai-configs");
+      if (res.ok) setAiConfigs(await res.json());
+    } catch (e) { console.error(e); }
   };
 
   const fetchNovelDetails = async (id: number, keepChapterId?: number) => {
@@ -385,7 +577,8 @@ export default function App() {
     if (!selectedNovel || !selectedNovel.world_setting) return;
     setIsRefactoringWorld(true);
     try {
-      const refactored = await refactorWorldSetting(selectedNovel.world_setting, aiConfig, lang);
+      const promptTemplate = getActivePrompt('refactor');
+      const refactored = await refactorWorldSetting(selectedNovel.world_setting, aiConfig, lang, promptTemplate);
       if (refactored) {
         await handleSaveNovelDetails({ world_setting: refactored });
       }
@@ -494,20 +687,44 @@ export default function App() {
     }
   };
 
+  const handleTestConnection = async (config: any) => {
+    setIsTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch("/api/ai-configs/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      setTestResult({ success: data.success, message: data.success ? data.message : data.error });
+    } catch (e: any) {
+      setTestResult({ success: false, message: e.message });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const handleSaveAIConfig = async (config: any) => {
+    try {
+      const res = await fetch("/api/ai-configs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      });
+      if (res.ok) {
+        setToast({ message: t.settingsSaved, type: 'success' });
+        fetchAIConfigs();
+      }
+    } catch (e) {
+      setToast({ message: t.saveError, type: 'error' });
+    }
+  };
+
   const handleSaveChapter = async () => {
     if (!currentChapter || !selectedNovel) return;
     setIsSaving(true);
     
-    let scheduledAt = currentChapter.scheduled_at;
-    if (scheduledAt && scheduledAt.length > 0) {
-      try {
-        // Ensure it's stored as UTC ISO string
-        scheduledAt = new Date(scheduledAt).toISOString();
-      } catch (e) {
-        console.error("Invalid date:", scheduledAt);
-      }
-    }
-
     try {
       const res = await fetch(`/api/chapters/${currentChapter.id}`, {
         method: "PATCH",
@@ -515,8 +732,7 @@ export default function App() {
         body: JSON.stringify({ 
           content: currentChapter.content,
           title: currentChapter.title,
-          summary: currentChapter.summary,
-          scheduled_at: scheduledAt || null
+          summary: currentChapter.summary
         }),
       });
       if (!res.ok) throw new Error(t.saveError || "Failed to save chapter");
@@ -620,7 +836,8 @@ export default function App() {
     if (!currentChapter || !selectedNovel || !contentToSummarize) return;
     setIsGenerating(true);
     try {
-      const summary = await generateChapterSummary(contentToSummarize, aiConfig, lang);
+      const promptTemplate = getActivePrompt('summary');
+      const summary = await generateChapterSummary(contentToSummarize, aiConfig, lang, promptTemplate);
       if (summary) {
         setCurrentChapter(prev => prev ? { ...prev, summary } : null);
         setChapters(prev => prev.map(ch => ch.id === currentChapter.id ? { ...ch, summary } : ch));
@@ -644,6 +861,53 @@ export default function App() {
     }
   };
 
+  const handleRefactorChapter = async () => {
+    if (!currentChapter || !selectedNovel || !currentChapter.content) return;
+    const controller = new AbortController();
+    setAbortController(controller);
+    setIsPolishing(true);
+    try {
+      const activeOutlineContent = selectedNovel.outlines?.find(o => o.is_active === 1)?.content || "";
+      const currentContent = currentChapter.content;
+      
+      const prompt = `请对以下小说章节内容进行重构和润色：\n\n${currentContent}`;
+      const context = `小说标题: ${selectedNovel.title}\n大纲: ${activeOutlineContent}`;
+      
+      let streamedText = "";
+      const promptTemplate = getActivePrompt('polish');
+      const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate);
+      
+      for await (const chunk of stream) {
+        if (controller.signal.aborted) break;
+        streamedText += chunk;
+        setCurrentChapter(prev => prev ? { ...prev, content: streamedText } : null);
+      }
+      
+      await fetch(`/api/chapters/${currentChapter.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          content: streamedText,
+          token_usage: Math.round(streamedText.length / 4)
+        }),
+      });
+      
+      fetchStats();
+      await fetchNovelDetails(selectedNovel.id, currentChapter.id);
+      setToast({ message: t.polishing + " " + t.completed, type: 'success' });
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Polishing aborted');
+      } else {
+        console.error(error);
+        setToast({ message: error.message || "Polishing failed", type: 'error' });
+      }
+    } finally {
+      setIsPolishing(false);
+      setAbortController(null);
+    }
+  };
+
   const handleAIWrite = async () => {
     if (!currentChapter || !selectedNovel) return;
     const controller = new AbortController();
@@ -654,12 +918,13 @@ export default function App() {
       const currentContent = currentChapter.content || "";
       
       // Stronger context for layout
-      const layoutContext = `IMPORTANT: Follow the ${writingConfig.layout} layout style strictly.`;
-      const prompt = `${layoutContext}\n\nContinue writing the chapter titled "${currentChapter.title}". The current content is: ${currentContent.slice(-800)}`;
-      const context = `Novel Title: ${selectedNovel.title}\nOutline: ${activeOutlineContent}`;
+      const layoutContext = `重要：请严格遵守 ${writingConfig.layout} 排版风格。`;
+      const prompt = `${layoutContext}\n\n继续创作章节《${currentChapter.title}》。当前内容为：${currentContent.slice(-800)}`;
+      const context = `小说标题: ${selectedNovel.title}\n大纲: ${activeOutlineContent}`;
       
       let streamedText = "";
-      const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal);
+      const promptTemplate = getActivePrompt('chapter');
+      const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate);
       
       for await (const chunk of stream) {
         if (controller.signal.aborted) break;
@@ -717,15 +982,16 @@ export default function App() {
         if (controller.signal.aborted) break;
         setSegmentProgress(Math.round(((i) / segments) * 100));
         
-        const layoutContext = `STRICT LAYOUT: Use the ${writingConfig.layout} style. For web novels, this means MAX 2 sentences per paragraph.`;
-        const prompt = `${layoutContext}\n\nThis is segment ${i + 1} of ${segments} for the chapter "${currentChapter.title}". 
-        ${i > 0 ? "CONTINUE exactly where the previous text ended. DO NOT repeat the previous sentences. Start with the next action or dialogue immediately." : "START the chapter from the beginning."} 
+        const layoutContext = `严格排版：使用 ${writingConfig.layout} 风格。对于网络小说，这意味着每段最多 2 句话。`;
+        const prompt = `${layoutContext}\n\n这是章节《${currentChapter.title}》的第 ${i + 1} 段（共 ${segments} 段）。
+        ${i > 0 ? "从上文结束的地方继续创作。不要重复之前的句子。立即开始接下来的行动或对话。" : "从头开始创作本章。"} 
         
-        Previous context for flow: ${currentContent.slice(-1000)}`;
-        const context = `Novel Title: ${selectedNovel.title}\nOutline: ${activeOutlineContent}`;
+        上文背景：${currentContent.slice(-1000)}`;
+        const context = `小说标题: ${selectedNovel.title}\n大纲: ${activeOutlineContent}`;
         
         let streamedText = "";
-        const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal);
+        const promptTemplate = getActivePrompt('chapter');
+        const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate);
         
         for await (const chunk of stream) {
           if (controller.signal.aborted) break;
@@ -798,14 +1064,15 @@ export default function App() {
     if (!selectedNovel) return;
     setIsGeneratingOutline(true);
     try {
-      const result = await generateAIOutline(selectedNovel.title, selectedNovel.description || "Novel", aiConfig, lang);
+      const promptTemplate = getActivePrompt('outline');
+      const result = await generateAIOutline(selectedNovel.title, selectedNovel.description || "小说", aiConfig, lang, promptTemplate);
       
       // Create a new version with the generated content
       const res = await fetch(`/api/novels/${selectedNovel.id}/outlines`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          version_name: `AI Generated ${format(new Date(), "HH:mm")}`,
+          version_name: `AI 生成 ${format(new Date(), "HH:mm")}`,
           content: result.text
         }),
       });
@@ -931,14 +1198,15 @@ export default function App() {
         // 2. Generate content with streaming
         const isLastChapter = nextChapterNum >= targetChapters;
         const prompt = isLastChapter 
-          ? `Write the FINAL chapter (${defaultTitle}) of the novel. Bring the story to a satisfying conclusion and resolve all major plot points.`
-          : `Write chapter ${nextChapterNum} (${defaultTitle}). Focus on advancing the plot according to the outline. Current progress: ${nextChapterNum}/${targetChapters} chapters.`;
+          ? `创作小说的最终章（${defaultTitle}）。为故事带来圆满的结局，并解决所有主要情节。`
+          : `创作第 ${nextChapterNum} 章（${defaultTitle}）。重点是根据大纲推进情节。当前进度：${nextChapterNum}/${targetChapters} 章。`;
         
-        const context = `Novel Title: ${selectedNovel.title}\nDescription: ${selectedNovel.description}\nTarget Total Chapters: ${targetChapters}\nOutline: ${activeOutlineContent}\nCharacters: ${selectedNovel.characters || "Not defined"}\nWorld Setting: ${selectedNovel.world_setting || "Not defined"}\nPrevious Chapters Context: ${currentChapters.slice(-2).map((c: any) => c.title + ": " + (c.content || "").slice(-500)).join("\n")}`;
+        const context = `小说标题: ${selectedNovel.title}\n描述: ${selectedNovel.description}\n目标总章节: ${targetChapters}\n大纲: ${activeOutlineContent}\n角色: ${selectedNovel.characters || "未定义"}\n世界设定: ${selectedNovel.world_setting || "未定义"}\n前文背景: ${currentChapters.slice(-2).map((c: any) => c.title + ": " + (c.content || "").slice(-500)).join("\n")}`;
         
         let fullContent = "";
         
-        const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal);
+        const promptTemplate = getActivePrompt('chapter');
+        const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate);
         
         for await (const chunk of stream) {
           if (controller.signal.aborted) break;
@@ -993,82 +1261,123 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen bg-black text-zinc-300 font-sans">
+    <div className="flex h-screen bg-black text-zinc-300 font-sans overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-64 border-r border-zinc-800 p-6 flex flex-col gap-8">
-        <div className="flex items-center gap-3 px-2">
-          <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center text-black">
+      <aside className={cn(
+        "border-r border-zinc-800 p-6 flex flex-col gap-8 transition-all duration-300 relative",
+        isSidebarCollapsed ? "w-20" : "w-64"
+      )}>
+        <button 
+          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          className="absolute -right-3 top-10 w-6 h-6 bg-zinc-800 border border-zinc-700 rounded-full flex items-center justify-center text-zinc-400 hover:text-white z-10"
+        >
+          <ChevronRight size={14} className={cn("transition-transform", !isSidebarCollapsed && "rotate-180")} />
+        </button>
+
+        <div className={cn("flex items-center gap-3 px-2", isSidebarCollapsed && "justify-center")}>
+          <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center text-black shrink-0">
             <Sparkles size={24} />
           </div>
-          <h1 className="text-xl font-bold text-white tracking-tight">{t.appName}</h1>
+          {!isSidebarCollapsed && <h1 className="text-xl font-bold text-white tracking-tight">{t.appName}</h1>}
         </div>
 
-        <nav className="flex flex-col gap-2">
+        <nav className="flex flex-col gap-2 overflow-y-auto custom-scrollbar">
           <SidebarItem 
             icon={LayoutDashboard} 
             label={t.dashboard} 
             active={activeTab === "dashboard"} 
             onClick={() => setActiveTab("dashboard")} 
+            collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
             icon={BookOpen} 
             label={t.myNovels} 
             active={activeTab === "novels"} 
             onClick={() => setActiveTab("novels")} 
+            collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
             icon={BarChart3} 
             label={t.statistics} 
             active={activeTab === "stats"} 
             onClick={() => setActiveTab("stats")} 
+            collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
             icon={Calendar} 
             label={t.scheduledTasks} 
             active={activeTab === "tasks"} 
             onClick={() => setActiveTab("tasks")} 
+            collapsed={isSidebarCollapsed}
+          />
+          <SidebarItem 
+            icon={FileText} 
+            label={t.prompts} 
+            active={activeTab === "prompts"} 
+            onClick={() => setActiveTab("prompts")} 
+            collapsed={isSidebarCollapsed}
+          />
+          <SidebarItem 
+            icon={Clock} 
+            label={t.logs} 
+            active={activeTab === "logs"} 
+            onClick={() => setActiveTab("logs")} 
+            collapsed={isSidebarCollapsed}
+          />
+          <SidebarItem 
+            icon={Cpu} 
+            label={t.aiConfig} 
+            active={activeTab === "ai-config"} 
+            onClick={() => setActiveTab("ai-config")} 
+            collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
             icon={Settings} 
             label={t.settings} 
             active={activeTab === "settings"} 
             onClick={() => setActiveTab("settings")} 
+            collapsed={isSidebarCollapsed}
           />
         </nav>
 
         <div className="mt-auto space-y-4">
-          <div className="px-2">
-            <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-2 flex items-center gap-2">
-              <Languages size={12} />
-              {t.language}
-            </p>
-            <div className="flex gap-2">
-              <button 
-                onClick={() => setLang('en')}
-                className={cn(
-                  "flex-1 py-1.5 text-xs rounded-lg border transition-all",
-                  lang === 'en' ? "bg-zinc-800 border-zinc-700 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"
-                )}
-              >
-                EN
-              </button>
-              <button 
-                onClick={() => setLang('zh')}
-                className={cn(
-                  "flex-1 py-1.5 text-xs rounded-lg border transition-all",
-                  lang === 'zh' ? "bg-zinc-800 border-zinc-700 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"
-                )}
-              >
-                中文
-              </button>
+          {!isSidebarCollapsed && (
+            <div className="px-2">
+              <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-2 flex items-center gap-2">
+                <Languages size={12} />
+                {t.language}
+              </p>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setLang('en')}
+                  className={cn(
+                    "flex-1 py-1.5 text-xs rounded-lg border transition-all",
+                    lang === 'en' ? "bg-zinc-800 border-zinc-700 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"
+                  )}
+                >
+                  EN
+                </button>
+                <button 
+                  onClick={() => setLang('zh')}
+                  className={cn(
+                    "flex-1 py-1.5 text-xs rounded-lg border transition-all",
+                    lang === 'zh' ? "bg-zinc-800 border-zinc-700 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"
+                  )}
+                >
+                  中文
+                </button>
+              </div>
             </div>
-          </div>
+          )}
           <button 
             onClick={() => setShowCreateModal(true)}
-            className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl flex items-center justify-center gap-2 transition-all"
+            className={cn(
+              "w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl flex items-center justify-center gap-2 transition-all",
+              isSidebarCollapsed && "p-0 h-12 w-12 mx-auto"
+            )}
           >
             <Plus size={20} />
-            {t.newNovel}
+            {!isSidebarCollapsed && t.newNovel}
           </button>
         </div>
       </aside>
@@ -1603,10 +1912,6 @@ export default function App() {
                     <Save size={18} />
                     {t.save}
                   </button>
-                  <button className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-lg flex items-center gap-2 transition-all">
-                    <Send size={18} />
-                    {t.publish}
-                  </button>
                 </div>
               </header>
 
@@ -1759,38 +2064,87 @@ export default function App() {
                           placeholder={t.startWriting}
                           className="flex-1 p-8 bg-transparent border-none text-zinc-300 text-lg leading-relaxed focus:outline-none resize-none"
                         />
-                        <div className="p-4 bg-zinc-900/80 border-t border-zinc-800 flex items-center justify-between gap-4">
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <button 
-                              onClick={isGenerating || isSegmenting ? () => abortController?.abort() : handleAIWrite}
-                              className={cn(
-                                "px-4 py-2 rounded-lg flex items-center gap-2 transition-all whitespace-nowrap",
-                                isGenerating || isSegmenting 
-                                  ? "bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20" 
-                                  : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20"
-                              )}
-                            >
-                              {isGenerating || isSegmenting ? <Square size={16} fill="currentColor" /> : <Sparkles size={16} className={isGenerating ? "animate-spin" : ""} />}
-                              {isGenerating || isSegmenting ? "停止 (Stop)" : t.aiAssist}
-                            </button>
+                        <div className="p-3 bg-zinc-900/90 border-t border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-md">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {/* AI Assist Group */}
+                            <div className="flex items-center bg-zinc-800/30 rounded-xl p-1 border border-zinc-700/30">
+                              <button 
+                                onClick={isGenerating || isSegmenting ? () => abortController?.abort() : handleAIWrite}
+                                className={cn(
+                                  "px-4 py-1.5 rounded-lg flex items-center gap-2 transition-all text-xs font-bold",
+                                  isGenerating || isSegmenting 
+                                    ? "bg-rose-500 text-white shadow-lg shadow-rose-500/20" 
+                                    : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400"
+                                )}
+                              >
+                                {isGenerating || isSegmenting ? <Square size={14} fill="currentColor" /> : <Sparkles size={14} className={isGenerating ? "animate-spin" : ""} />}
+                                {isGenerating || isSegmenting ? "停止" : t.aiAssist}
+                              </button>
+                              <TemplateSelector 
+                                type="chapter"
+                                prompts={prompts}
+                                selectedId={selectedTemplates['chapter']}
+                                onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, chapter: id }))}
+                                onDelete={handleDeletePrompt}
+                                t={t}
+                              />
+                            </div>
 
-                            <button 
-                              onClick={() => handleGenerateSummary()}
-                              disabled={isGenerating || isSegmenting || !currentChapter.content}
-                              className="px-4 py-2 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-400 border border-zinc-700/50 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50 whitespace-nowrap"
-                              title={t.summarize}
-                            >
-                              <FileText size={16} />
-                              {t.summarize}
-                            </button>
+                            {/* Polish Group */}
+                            <div className="flex items-center bg-zinc-800/30 rounded-xl p-1 border border-zinc-700/30">
+                              <button 
+                                onClick={isPolishing ? () => abortController?.abort() : handleRefactorChapter}
+                                disabled={!currentChapter.content}
+                                className={cn(
+                                  "px-3 py-1.5 rounded-lg flex items-center gap-2 transition-all text-xs font-bold",
+                                  isPolishing 
+                                    ? "bg-amber-500 text-white shadow-lg shadow-amber-500/20" 
+                                    : "hover:bg-zinc-800 text-zinc-400"
+                                )}
+                                title={t.polish}
+                              >
+                                {isPolishing ? <Square size={14} fill="currentColor" /> : <Zap size={14} className={isPolishing ? "animate-pulse" : ""} />}
+                                {isPolishing ? "停止" : t.polish}
+                              </button>
+                              <TemplateSelector 
+                                type="polish"
+                                prompts={prompts}
+                                selectedId={selectedTemplates['polish']}
+                                onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, polish: id }))}
+                                onDelete={handleDeletePrompt}
+                                t={t}
+                              />
+                            </div>
 
+                            {/* Summary Group */}
+                            <div className="flex items-center bg-zinc-800/30 rounded-xl p-1 border border-zinc-700/30">
+                              <button 
+                                onClick={() => handleGenerateSummary()}
+                                disabled={isGenerating || isSegmenting || !currentChapter.content}
+                                className="px-3 py-1.5 hover:bg-zinc-800 text-zinc-400 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50 text-xs font-bold"
+                                title={t.summarize}
+                              >
+                                <FileText size={14} />
+                                {t.summarize}
+                              </button>
+                              <TemplateSelector 
+                                type="summary"
+                                prompts={prompts}
+                                selectedId={selectedTemplates['summary']}
+                                onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, summary: id }))}
+                                onDelete={handleDeletePrompt}
+                                t={t}
+                              />
+                            </div>
+
+                            {/* Segmented Group */}
                             <button 
                               onClick={handleSegmentedWrite}
                               disabled={isGenerating || isSegmenting}
-                              className="px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50 whitespace-nowrap relative overflow-hidden"
+                              className="px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-xl flex items-center gap-2 transition-all disabled:opacity-50 text-xs font-bold relative overflow-hidden"
                             >
-                              <Layers size={16} />
-                              {isSegmenting ? `${t.segmentedWriting} ${segmentProgress}%` : t.segmentedWrite}
+                              <Layers size={14} />
+                              {isSegmenting ? `${segmentProgress}%` : t.segmentedWrite}
                               {isSegmenting && (
                                 <div 
                                   className="absolute bottom-0 left-0 h-0.5 bg-indigo-500 transition-all duration-300" 
@@ -1798,53 +2152,31 @@ export default function App() {
                                 />
                               )}
                             </button>
-                            
-                            <div className="h-6 w-px bg-zinc-800 hidden sm:block" />
-
-                            <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800/30 border border-zinc-700/30 rounded-lg">
-                              <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                              <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">{t.activeAI}:</span>
-                              <span className="text-[10px] text-emerald-400 font-mono font-bold">{aiConfig.provider.toUpperCase()} ({aiConfig.model})</span>
-                            </div>
-
-                            <div className="flex items-center gap-3 px-3 py-1.5 bg-zinc-800/30 border border-zinc-700/30 rounded-lg group hover:border-emerald-500/40 transition-all duration-300">
-                              <Calendar size={14} className="text-zinc-500 group-hover:text-emerald-400" />
-                              <input 
-                                type="datetime-local"
-                                value={(() => {
-                                  if (!currentChapter.scheduled_at) return "";
-                                  try {
-                                    const d = new Date(currentChapter.scheduled_at);
-                                    if (!isNaN(d.getTime())) {
-                                      return format(d, "yyyy-MM-dd'T'HH:mm");
-                                    }
-                                  } catch (e) {}
-                                  return currentChapter.scheduled_at;
-                                })()}
-                                onChange={(e) => setCurrentChapter({...currentChapter, scheduled_at: e.target.value})}
-                                onBlur={handleSaveChapter}
-                                onClick={(e) => (e.target as any).showPicker?.()}
-                                className="bg-transparent border-none text-[10px] focus:outline-none text-zinc-400 cursor-pointer hover:text-white transition-colors w-32 [color-scheme:dark] font-medium"
-                              />
-                            </div>
                           </div>
 
-                          <div className="text-[10px] text-zinc-600 italic flex items-center gap-2 shrink-0">
-                            {isSaving ? (
-                              <>
-                                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                                正在保存...
-                              </>
-                            ) : (
-                              <>
-                                {t.autoSaved}
-                                {lastSavedAt && (
-                                  <span className="ml-1 opacity-60">
-                                    ({format(lastSavedAt, "HH:mm:ss")})
-                                  </span>
-                                )}
-                              </>
-                            )}
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-xl">
+                              <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                              <span className="text-[10px] text-emerald-500/70 font-mono font-bold">{aiConfig.model}</span>
+                            </div>
+
+                            <div className="text-[10px] text-zinc-600 font-medium italic flex items-center gap-2 shrink-0">
+                              {isSaving ? (
+                                <>
+                                  <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                                  保存中...
+                                </>
+                              ) : (
+                                <>
+                                  {t.autoSaved}
+                                  {lastSavedAt && (
+                                    <span className="ml-1 opacity-60">
+                                      {format(lastSavedAt, "HH:mm")}
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </Card>
@@ -1889,7 +2221,15 @@ export default function App() {
                               <option key={o.id} value={o.id}>{o.version_name} {o.is_active ? `(${t.activeVersion})` : ""}</option>
                             ))}
                           </select>
-                          <div className="flex gap-1">
+                          <div className="flex gap-1 items-center">
+                            <TemplateSelector 
+                              type="outline"
+                              prompts={prompts}
+                              selectedId={selectedTemplates['outline']}
+                              onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, outline: id }))}
+                              onDelete={handleDeletePrompt}
+                              t={t}
+                            />
                             <button 
                               onClick={handleAIGenerateOutline}
                               disabled={isGeneratingOutline}
@@ -2080,19 +2420,29 @@ export default function App() {
                             <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">System</span>
                           </div>
                           {selectedNovel.world_setting && (
-                            <button 
-                              onClick={handleRefactorWorldSetting}
-                              disabled={isRefactoringWorld}
-                              className={cn(
-                                "text-[10px] font-bold uppercase tracking-wider transition-colors px-2 py-1 rounded flex items-center gap-1.5",
-                                isRefactoringWorld 
-                                  ? "bg-emerald-500/20 text-emerald-400 animate-pulse" 
-                                  : "text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10"
-                              )}
-                            >
-                              <Sparkles size={10} className={isRefactoringWorld ? "animate-spin" : ""} />
-                              {isRefactoringWorld ? t.refactoring : t.refactor}
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <TemplateSelector 
+                                type="refactor"
+                                prompts={prompts}
+                                selectedId={selectedTemplates['refactor']}
+                                onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, refactor: id }))}
+                                onDelete={handleDeletePrompt}
+                                t={t}
+                              />
+                              <button 
+                                onClick={handleRefactorWorldSetting}
+                                disabled={isRefactoringWorld}
+                                className={cn(
+                                  "text-[10px] font-bold uppercase tracking-wider transition-colors px-2 py-1 rounded flex items-center gap-1.5",
+                                  isRefactoringWorld 
+                                    ? "bg-emerald-500/20 text-emerald-400 animate-pulse" 
+                                    : "text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10"
+                                )}
+                              >
+                                <Sparkles size={10} className={isRefactoringWorld ? "animate-spin" : ""} />
+                                {isRefactoringWorld ? t.refactoring : t.refactor}
+                              </button>
+                            </div>
                           )}
                           <button 
                             onClick={() => toggleEditMode('world')}
@@ -2389,7 +2739,7 @@ export default function App() {
               <header className="flex items-center justify-between">
                 <div>
                   <h2 className="text-3xl font-bold text-white mb-2">{t.scheduledTasks}</h2>
-                  <p className="text-zinc-500">Manage your automated generation and publishing tasks.</p>
+                  <p className="text-zinc-500">Manage your automated generation tasks.</p>
                 </div>
                 <button 
                   onClick={() => setShowTaskModal(true)}
@@ -2425,16 +2775,15 @@ export default function App() {
                             <tr key={task.id} className="text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
                               <td className="px-4 py-4">
                                 <div className="flex items-center gap-2">
-                                  {task.type === 'generate' ? <Sparkles size={14} className="text-emerald-400" /> : <Send size={14} className="text-blue-400" />}
+                                  <Sparkles size={14} className="text-emerald-400" />
                                   <span className="font-medium">
-                                    {task.type === 'generate' ? t.generateChapter : t.publishToPlatform}
+                                    {t.generateChapter}
                                   </span>
                                 </div>
                               </td>
                               <td className="px-4 py-4">
                                 <p className="font-medium text-zinc-200">{task.novel_title || '-'}</p>
                                 {task.chapter_title && <p className="text-xs text-zinc-500">{task.chapter_title}</p>}
-                                {task.platform_name && <p className="text-xs text-blue-400/70">{task.platform_name}</p>}
                               </td>
                               <td className="px-4 py-4 text-zinc-400">
                                 <div className="flex items-center gap-1.5">
@@ -2469,31 +2818,357 @@ export default function App() {
                     </table>
                   </div>
                 </Card>
+              </div>
+            </motion.div>
+          )}
 
-                <Card title={t.platforms}>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {platforms.map(platform => (
-                      <div key={platform.id} className="p-4 bg-zinc-800/50 border border-zinc-700 rounded-xl flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-zinc-700 rounded-lg flex items-center justify-center text-emerald-400">
-                            <Globe size={20} />
-                          </div>
-                          <div>
-                            <p className="font-bold text-zinc-100">{platform.name}</p>
-                            <p className="text-xs text-zinc-500 uppercase tracking-wider">{platform.type}</p>
-                          </div>
+          {activeTab === "prompts" && (
+            <motion.div
+              key="prompts"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-8"
+            >
+              <header className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-3xl font-bold text-white mb-2">{t.prompts}</h2>
+                  <p className="text-zinc-500">{t.promptsDesc}</p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setEditingPrompt({ name: '', content: '', type: promptFilter === 'all' ? 'chapter' : promptFilter as any, is_default: 0 });
+                    setShowPromptModal(true);
+                  }}
+                  className="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                >
+                  <Plus size={20} />
+                  {t.addPrompt}
+                </button>
+              </header>
+
+              <div className="flex items-center gap-2 p-1 bg-zinc-900/50 border border-zinc-800 rounded-xl w-fit">
+                {['all', 'chapter', 'outline', 'summary', 'refactor', 'polish'].map((filter) => (
+                  <button
+                    key={filter}
+                    onClick={() => setPromptFilter(filter)}
+                    className={cn(
+                      "px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                      promptFilter === filter 
+                        ? "bg-zinc-800 text-white shadow-sm" 
+                        : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    {filter === 'all' ? "全部 (All)" : 
+                     filter === 'chapter' ? t.typeChapter : 
+                     filter === 'outline' ? t.typeOutline : 
+                     filter === 'summary' ? t.typeSummary : 
+                     filter === 'refactor' ? t.typeRefactor : t.typePolish}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {prompts
+                  .filter(p => promptFilter === 'all' || p.type === promptFilter)
+                  .map(prompt => (
+                  <div 
+                    key={prompt.id} 
+                    className="group relative bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6 hover:border-zinc-700 transition-all hover:shadow-xl hover:shadow-black/20"
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-lg font-bold text-white group-hover:text-emerald-400 transition-colors">{prompt.name}</h4>
+                          {prompt.is_default === 1 && (
+                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold uppercase tracking-wider rounded border border-emerald-500/20">
+                              {t.isDefault}
+                            </span>
+                          )}
                         </div>
-                        <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] rounded-full border border-emerald-500/20">
-                          {t.active}
-                        </span>
+                        <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+                          {prompt.type === 'chapter' ? t.typeChapter : 
+                           prompt.type === 'outline' ? t.typeOutline : 
+                           prompt.type === 'summary' ? t.typeSummary : 
+                           prompt.type === 'refactor' ? t.typeRefactor : t.typePolish}
+                        </p>
                       </div>
-                    ))}
-                    <button className="p-4 border-2 border-dashed border-zinc-800 rounded-xl flex items-center justify-center gap-2 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300 transition-all">
-                      <Plus size={20} />
-                      {t.addPlatform}
-                    </button>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {prompt.is_default !== 1 && (
+                          <button 
+                            onClick={() => handleSetDefaultPrompt(prompt.id, prompt.type)}
+                            className="p-2 text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all"
+                            title={t.setDefault}
+                          >
+                            <Sparkles size={16} />
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => {
+                            setEditingPrompt(prompt);
+                            setShowPromptModal(true);
+                          }}
+                          className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
+                        >
+                          <Settings size={16} />
+                        </button>
+                        <button 
+                          onClick={() => handleDeletePrompt(prompt.id)}
+                          className="p-2 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="relative">
+                      <div className="bg-black/20 rounded-xl p-4 border border-zinc-800/50 font-mono text-xs text-zinc-400 leading-relaxed max-h-32 overflow-hidden relative">
+                        {prompt.content}
+                        <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-zinc-900/40 to-transparent" />
+                      </div>
+                    </div>
                   </div>
-                </Card>
+                ))}
+                
+                {prompts.filter(p => promptFilter === 'all' || p.type === promptFilter).length === 0 && (
+                  <div className="col-span-full py-20 flex flex-col items-center justify-center text-zinc-600 border-2 border-dashed border-zinc-800 rounded-3xl">
+                    <div className="p-4 bg-zinc-900 rounded-full mb-4">
+                      <Plus size={32} />
+                    </div>
+                    <p className="text-lg font-medium mb-2">暂无模板</p>
+                    <p className="text-sm opacity-60">点击右上角按钮添加您的第一个提示词模板</p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === "logs" && (
+            <motion.div
+              key="logs"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-8"
+            >
+              <header>
+                <h2 className="text-3xl font-bold text-white mb-2">{t.logs}</h2>
+                <p className="text-zinc-500">{t.logsDesc}</p>
+              </header>
+
+              <Card>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-left border-b border-zinc-800">
+                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.action}</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.details}</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.time}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/50">
+                      {logs.map(log => (
+                        <tr key={log.id} className="text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
+                          <td className="px-4 py-4">
+                            <span className="font-mono text-emerald-400">{log.action}</span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <p className="text-xs text-zinc-500 max-w-md truncate">{log.details}</p>
+                          </td>
+                          <td className="px-4 py-4 text-zinc-400 text-xs">
+                            {format(new Date(log.created_at), 'yyyy-MM-dd HH:mm:ss')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+
+          {activeTab === "ai-config" && (
+            <motion.div
+              key="ai-config"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="max-w-4xl mx-auto space-y-8"
+            >
+              <header>
+                <h2 className="text-3xl font-bold text-white mb-2">{t.aiConfig}</h2>
+                <p className="text-zinc-500">{t.aiConfigDesc}</p>
+              </header>
+
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                <div className="lg:col-span-1 space-y-2">
+                  {(['gemini', 'openai', 'deepseek', 'custom'] as AIProvider[]).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => {
+                        setActiveProvider(p);
+                        setTestResult(null);
+                      }}
+                      className={cn(
+                        "w-full py-3 px-4 rounded-xl border transition-all text-left flex items-center justify-between group",
+                        activeProvider === p 
+                          ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" 
+                          : "bg-zinc-900/50 border-zinc-800 text-zinc-500 hover:border-zinc-700"
+                      )}
+                    >
+                      <span className="font-bold">{t[p]}</span>
+                      {aiConfigs.find(c => c.provider === p)?.is_active === 1 && (
+                        <div className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="lg:col-span-3">
+                  <Card>
+                    <div className="space-y-6">
+                      {/* Provider Config Form */}
+                      {(() => {
+                        const config = aiConfigs.find(c => c.provider === activeProvider) || {
+                          provider: activeProvider,
+                          model: activeProvider === 'gemini' ? 'gemini-3-flash-preview' : (activeProvider === 'openai' ? 'gpt-4o' : (activeProvider === 'deepseek' ? 'deepseek-chat' : '')),
+                          api_key: '',
+                          base_url: activeProvider === 'deepseek' ? "https://api.deepseek.com" : (activeProvider === 'openai' ? "https://api.openai.com/v1" : ""),
+                          parameters: JSON.stringify({ temperature: 0.7, top_p: 0.9, max_tokens: 2000 }),
+                          is_active: 0
+                        };
+
+                        const params = JSON.parse(config.parameters || '{}');
+
+                        return (
+                          <div className="space-y-6">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <label className="text-sm font-medium text-zinc-400">{t.model}</label>
+                                <input
+                                  type="text"
+                                  value={config.model || ""}
+                                  onChange={(e) => {
+                                    const newConfigs = [...aiConfigs];
+                                    const idx = newConfigs.findIndex(c => c.provider === activeProvider);
+                                    if (idx > -1) newConfigs[idx].model = e.target.value;
+                                    else newConfigs.push({ ...config, model: e.target.value } as any);
+                                    setAiConfigs(newConfigs);
+                                  }}
+                                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="text-sm font-medium text-zinc-400">{t.baseUrl}</label>
+                                <input
+                                  type="text"
+                                  value={config.base_url || ""}
+                                  onChange={(e) => {
+                                    const newConfigs = [...aiConfigs];
+                                    const idx = newConfigs.findIndex(c => c.provider === activeProvider);
+                                    if (idx > -1) newConfigs[idx].base_url = e.target.value;
+                                    else newConfigs.push({ ...config, base_url: e.target.value } as any);
+                                    setAiConfigs(newConfigs);
+                                  }}
+                                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-zinc-400">{t.apiKey}</label>
+                              <input
+                                type="password"
+                                value={config.api_key || ""}
+                                onChange={(e) => {
+                                  const newConfigs = [...aiConfigs];
+                                  const idx = newConfigs.findIndex(c => c.provider === activeProvider);
+                                  if (idx > -1) newConfigs[idx].api_key = e.target.value;
+                                  else newConfigs.push({ ...config, api_key: e.target.value } as any);
+                                  setAiConfigs(newConfigs);
+                                }}
+                                className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all font-mono"
+                              />
+                            </div>
+
+                            <div className="pt-4 border-t border-zinc-800">
+                              <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                                <Activity size={16} className="text-emerald-500" />
+                                {t.advancedParams}
+                              </h4>
+                              <div className="grid grid-cols-2 gap-6">
+                                <div className="space-y-2">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-zinc-500">{t.temperature}</label>
+                                    <span className="text-xs text-emerald-400">{params.temperature}</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="0" max="2" step="0.1" 
+                                    value={params.temperature || 0.7}
+                                    onChange={(e) => {
+                                      const newParams = { ...params, temperature: parseFloat(e.target.value) };
+                                      const newConfigs = [...aiConfigs];
+                                      const idx = newConfigs.findIndex(c => c.provider === activeProvider);
+                                      if (idx > -1) newConfigs[idx].parameters = JSON.stringify(newParams);
+                                      else newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      setAiConfigs(newConfigs);
+                                    }}
+                                    className="w-full accent-emerald-500"
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-zinc-500">{t.topP}</label>
+                                    <span className="text-xs text-emerald-400">{params.top_p}</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="0" max="1" step="0.05" 
+                                    value={params.top_p || 0.9}
+                                    onChange={(e) => {
+                                      const newParams = { ...params, top_p: parseFloat(e.target.value) };
+                                      const newConfigs = [...aiConfigs];
+                                      const idx = newConfigs.findIndex(c => c.provider === activeProvider);
+                                      if (idx > -1) newConfigs[idx].parameters = JSON.stringify(newParams);
+                                      else newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      setAiConfigs(newConfigs);
+                                    }}
+                                    className="w-full accent-emerald-500"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-6 border-t border-zinc-800">
+                              <div className="flex gap-3">
+                                <button 
+                                  onClick={() => handleTestConnection(config)}
+                                  disabled={isTesting}
+                                  className="px-6 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-bold rounded-xl transition-all flex items-center gap-2"
+                                >
+                                  {isTesting ? <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <Zap size={16} />}
+                                  {t.testConnection}
+                                </button>
+                                <button 
+                                  onClick={() => handleSaveAIConfig({ ...config, is_active: 1 })}
+                                  className="px-6 py-2 bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold rounded-xl transition-all"
+                                >
+                                  {t.saveSettings}
+                                </button>
+                              </div>
+                              
+                              {testResult && (
+                                <div className={cn(
+                                  "flex items-center gap-2 text-xs font-medium",
+                                  testResult.success ? "text-emerald-400" : "text-rose-400"
+                                )}>
+                                  {testResult.success ? <Sparkles size={14} /> : <X size={14} />}
+                                  {testResult.message}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </Card>
+                </div>
               </div>
             </motion.div>
           )}
@@ -2505,70 +3180,6 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               className="max-w-2xl mx-auto space-y-8"
             >
-              <header>
-                <h2 className="text-3xl font-bold text-white mb-2">{t.aiSettings}</h2>
-                <p className="text-zinc-500">Configure your AI providers and models.</p>
-              </header>
-
-              <Card>
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-zinc-400">{t.aiProvider}</label>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {(['gemini', 'openai', 'deepseek', 'custom'] as AIProvider[]).map((p) => (
-                        <button
-                          key={p}
-                          onClick={() => setAiConfig({ ...aiConfig, provider: p, model: p === 'gemini' ? 'gemini-3-flash-preview' : (p === 'openai' ? 'gpt-4o' : (p === 'deepseek' ? 'deepseek-chat' : '')) })}
-                          className={cn(
-                            "py-3 px-2 rounded-xl border transition-all text-[10px] sm:text-xs font-medium",
-                            aiConfig.provider === p 
-                              ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" 
-                              : "bg-zinc-800/50 border-zinc-700 text-zinc-500 hover:border-zinc-600"
-                          )}
-                        >
-                          {t[p]}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-zinc-400">{t.aiModel}</label>
-                    <input
-                      type="text"
-                      value={aiConfig.model || ""}
-                      onChange={(e) => setAiConfig({ ...aiConfig, model: e.target.value })}
-                      placeholder={t.modelPlaceholder}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-zinc-400">{t.apiKey} {aiConfig.provider === 'gemini' && '(Optional if set in env)'}</label>
-                    <input
-                      type="password"
-                      value={aiConfig.apiKey || ""}
-                      onChange={(e) => setAiConfig({ ...aiConfig, apiKey: e.target.value })}
-                      placeholder={t.apiKeyPlaceholder}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all font-mono"
-                    />
-                  </div>
-
-                  {aiConfig.provider !== 'gemini' && (
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-zinc-400">{t.baseUrl}</label>
-                      <input
-                        type="text"
-                        value={aiConfig.baseUrl || ""}
-                        onChange={(e) => setAiConfig({ ...aiConfig, baseUrl: e.target.value })}
-                        placeholder={aiConfig.provider === 'deepseek' ? "https://api.deepseek.com" : "https://api.openai.com/v1"}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                      />
-                    </div>
-                  )}
-                </div>
-              </Card>
-
               <header>
                 <h2 className="text-3xl font-bold text-white mb-2">{t.writingConfig}</h2>
                 <p className="text-zinc-500">Customize how AI generates your story content.</p>
@@ -2757,30 +3368,15 @@ export default function App() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-2">{t.taskType}</label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3">
                     <button 
                       onClick={() => setNewTask({ ...newTask, type: 'generate' })}
                       className={cn(
-                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
-                        newTask.type === 'generate' 
-                          ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" 
-                          : "bg-zinc-800/50 border-zinc-700 text-zinc-500 hover:border-zinc-600"
+                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2 bg-emerald-500/10 border-emerald-500/50 text-emerald-400"
                       )}
                     >
                       <Sparkles size={16} />
                       {t.generateChapter}
-                    </button>
-                    <button 
-                      onClick={() => setNewTask({ ...newTask, type: 'publish' })}
-                      className={cn(
-                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
-                        newTask.type === 'publish' 
-                          ? "bg-blue-500/10 border-blue-500/50 text-blue-400" 
-                          : "bg-zinc-800/50 border-zinc-700 text-zinc-500 hover:border-zinc-600"
-                      )}
-                    >
-                      <Send size={16} />
-                      {t.publishToPlatform}
                     </button>
                   </div>
                 </div>
@@ -2798,37 +3394,6 @@ export default function App() {
                     ))}
                   </select>
                 </div>
-
-                {newTask.type === 'publish' && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-zinc-400 mb-2">{t.chapters}</label>
-                      <select 
-                        value={newTask.chapter_id || ""}
-                        onChange={(e) => setNewTask({ ...newTask, chapter_id: parseInt(e.target.value) })}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                      >
-                        <option value="">{t.selectChapter}</option>
-                        {chapters.map(c => (
-                          <option key={c.id} value={c.id}>{c.title}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-zinc-400 mb-2">{t.selectPlatform}</label>
-                      <select 
-                        value={newTask.platform_id || ""}
-                        onChange={(e) => setNewTask({ ...newTask, platform_id: parseInt(e.target.value) })}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                      >
-                        <option value="">{t.selectPlatform}</option>
-                        {platforms.map(p => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </>
-                )}
 
                 <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-2">{t.scheduleTime}</label>
@@ -2849,12 +3414,109 @@ export default function App() {
                   </button>
                   <button 
                     onClick={handleCreateTask}
-                    disabled={!newTask.novel_id || !newTask.scheduled_at || (newTask.type === 'publish' && (!newTask.chapter_id || !newTask.platform_id))}
+                    disabled={!newTask.novel_id || !newTask.scheduled_at}
                     className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-black font-bold rounded-xl transition-all"
                   >
                     {t.confirm}
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showPromptModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-2xl bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+                <h3 className="text-xl font-bold text-white">
+                  {editingPrompt?.id ? "编辑提示词" : "添加提示词"}
+                </h3>
+                <button 
+                  onClick={() => setShowPromptModal(false)}
+                  className="text-zinc-500 hover:text-white transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              
+              <div className="p-6 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">{t.promptName}</label>
+                    <input
+                      type="text"
+                      value={editingPrompt?.name || ""}
+                      onChange={(e) => setEditingPrompt(prev => ({ ...prev, name: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-zinc-700"
+                      placeholder="例如：玄幻风格章节生成"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">{t.promptType}</label>
+                    <div className="relative">
+                      <select
+                        value={editingPrompt?.type || "chapter"}
+                        onChange={(e) => setEditingPrompt(prev => ({ ...prev, type: e.target.value as any }))}
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 transition-all appearance-none"
+                      >
+                        <option value="chapter">{t.typeChapter}</option>
+                        <option value="outline">{t.typeOutline}</option>
+                        <option value="summary">{t.typeSummary}</option>
+                        <option value="refactor">{t.typeRefactor}</option>
+                        <option value="polish">{t.typePolish}</option>
+                      </select>
+                      <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between ml-1">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.promptContent}</label>
+                    <span className="text-[10px] text-zinc-700 font-mono">Supports: {"{title}, {chapter_num}"}</span>
+                  </div>
+                  <textarea
+                    value={editingPrompt?.content || ""}
+                    onChange={(e) => setEditingPrompt(prev => ({ ...prev, content: e.target.value }))}
+                    className="w-full h-64 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-4 text-zinc-300 focus:outline-none focus:border-emerald-500/50 transition-all font-mono text-sm resize-none leading-relaxed"
+                    placeholder="输入提示词内容..."
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-xl group cursor-pointer" onClick={() => setEditingPrompt(prev => ({ ...prev, is_default: prev?.is_default === 1 ? 0 : 1 }))}>
+                  <div className={cn(
+                    "w-5 h-5 rounded border flex items-center justify-center transition-all",
+                    editingPrompt?.is_default === 1 ? "bg-emerald-500 border-emerald-500 text-black" : "border-zinc-700 group-hover:border-zinc-500"
+                  )}>
+                    {editingPrompt?.is_default === 1 && <Zap size={12} fill="currentColor" />}
+                  </div>
+                  <span className="text-sm text-zinc-300 font-medium">
+                    设为默认提示词 (Set as Default)
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-6 bg-zinc-800/30 border-t border-zinc-800 flex justify-end gap-3">
+                <button
+                  onClick={() => setShowPromptModal(false)}
+                  className="px-6 py-2 text-zinc-400 hover:text-white transition-colors"
+                >
+                  {t.cancel}
+                </button>
+                <button
+                  onClick={handleSavePrompt}
+                  className="px-8 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all"
+                >
+                  {t.confirm}
+                </button>
               </div>
             </motion.div>
           </div>

@@ -8,30 +8,40 @@ export async function generateAIContent(
   config: AIConfig, 
   writingConfig: WritingConfig,
   language: string = 'en',
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  promptTemplate?: string
 ) {
-  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
+  const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   
   let layoutInstruction = "";
   if (writingConfig.layout === 'web') {
-    layoutInstruction = "STRICT LAYOUT RULE: Use web novel style. This means VERY short paragraphs (often just 1-2 sentences), frequent line breaks, and a lot of dialogue. Avoid long blocks of text at all costs.";
+    layoutInstruction = "严格排版规则：使用网络小说风格。这意味着段落非常短（通常只有1-2句话），频繁换行，并包含大量对话。务必避免长篇大论。";
   } else if (writingConfig.layout === 'traditional') {
-    layoutInstruction = "STRICT LAYOUT RULE: Use traditional literary style. This means longer, descriptive paragraphs, formal tone, and rich vocabulary. Use standard paragraph structures.";
+    layoutInstruction = "严格排版规则：使用传统文学风格。这意味着段落较长且具有描述性，语气正式，词汇丰富。使用标准段落结构。";
   } else {
-    layoutInstruction = "Use standard novel formatting with balanced paragraph lengths and natural flow.";
+    layoutInstruction = "使用标准小说格式，段落长度均衡，叙述流畅。";
   }
 
   const wordCountInstruction = writingConfig.enforceWordCount 
-    ? `The content should be between ${writingConfig.minWords} and ${writingConfig.maxWords} words.`
-    : "Follow the length requirements specified in the context or outline, if any. Otherwise, write a standard length chapter.";
+    ? `内容长度应在 ${writingConfig.minWords} 到 ${writingConfig.maxWords} 字之间。`
+    : "如果没有特别说明，请遵循大纲中的长度要求。否则，请撰写标准长度的章节。";
 
-  const fullPrompt = `You are a creative novel writer. ${langInstruction}\n\n${layoutInstruction}\n${wordCountInstruction}\n\nContext: ${context}\n\nTask: ${prompt}`;
+  let fullPrompt = `你是一位创意小说作家。${langInstruction}\n\n${layoutInstruction}\n${wordCountInstruction}\n\n背景上下文：${context}\n\n任务：${prompt}`;
+  
+  if (promptTemplate) {
+    fullPrompt = promptTemplate
+      .replace(/{context}/g, context)
+      .replace(/{task}/g, prompt)
+      .replace(/{langInstruction}/g, langInstruction)
+      .replace(/{layoutInstruction}/g, layoutInstruction)
+      .replace(/{wordCountInstruction}/g, wordCountInstruction);
+  }
 
   if (config.provider === 'gemini') {
     const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
-    const systemInstruction = `You are a creative novel writer. ${layoutInstruction} ${langInstruction} 
-    STRICT RULE: Output ONLY the novel content. DO NOT include meta-talk, chapter summaries, or concluding remarks like 'This is Chapter X' or 'The story continues'. 
-    If continuing from previous text, start exactly where it left off without repeating anything.`;
+    const systemInstruction = `你是一位创意小说作家。${layoutInstruction} ${langInstruction} 
+    严格规则：仅输出小说内容。不要包含元对话、章节摘要或诸如“这是第X章”或“故事继续”之类的结束语。
+    如果是接着之前的文本创作，请从上次停止的地方开始，不要重复任何内容。`;
 
     try {
       const response = await ai.models.generateContent({
@@ -45,8 +55,8 @@ export async function generateAIContent(
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              title: { type: Type.STRING, description: "The title of the chapter" },
-              content: { type: Type.STRING, description: "The full content of the chapter" }
+              title: { type: Type.STRING, description: "章节标题" },
+              content: { type: Type.STRING, description: "章节完整内容" }
             },
             required: ["title", "content"]
           }
@@ -88,7 +98,7 @@ export async function generateAIContent(
       const response = await openai.chat.completions.create({
         model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : "")),
         messages: [
-          { role: "system", content: `You are a creative novel writer. ${layoutInstruction} ${langInstruction} Always return your response in JSON format with 'title' and 'content' keys.` },
+          { role: "system", content: `你是一位创意小说作家。${layoutInstruction} ${langInstruction} 始终以 JSON 格式返回响应，包含 'title' 和 'content' 键。` },
           { role: "user", content: fullPrompt }
         ],
         response_format: { type: "json_object" },
@@ -117,29 +127,40 @@ export async function* generateAIContentStream(
   config: AIConfig, 
   writingConfig: WritingConfig,
   language: string = 'en',
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  promptTemplate?: string
 ) {
-  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
+  const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   
   let layoutInstruction = "";
   if (writingConfig.layout === 'web') {
-    layoutInstruction = "STRICT LAYOUT RULE: Use web novel style. This means VERY short paragraphs (often just 1-2 sentences), frequent line breaks, and a lot of dialogue. Avoid long blocks of text at all costs.";
+    layoutInstruction = "严格排版规则：使用网络小说风格。这意味着段落非常短（通常只有1-2句话），频繁换行，并包含大量对话。务必避免长篇大论。";
   } else if (writingConfig.layout === 'traditional') {
-    layoutInstruction = "STRICT LAYOUT RULE: Use traditional literary style. This means longer, descriptive paragraphs, formal tone, and rich vocabulary. Use standard paragraph structures.";
+    layoutInstruction = "严格排版规则：使用传统文学风格。这意味着段落较长且具有描述性，语气正式，词汇丰富。使用标准段落结构。";
   } else {
-    layoutInstruction = "Use standard novel formatting with balanced paragraph lengths and natural flow.";
+    layoutInstruction = "使用标准小说格式，段落长度均衡，叙述流畅。";
   }
 
   const wordCountInstruction = writingConfig.enforceWordCount 
-    ? `The content should be between ${writingConfig.minWords} and ${writingConfig.maxWords} words.`
-    : "Follow the length requirements specified in the context or outline, if any. Otherwise, write a standard length chapter.";
-  const fullPrompt = `You are a creative novel writer. ${langInstruction}\n\n${layoutInstruction}\n${wordCountInstruction}\n\nContext: ${context}\n\nTask: ${prompt}\n\nIMPORTANT: Output ONLY the novel content text. Do not use JSON. Do not include titles or meta-talk.`;
+    ? `内容长度应在 ${writingConfig.minWords} 到 ${writingConfig.maxWords} 字之间。`
+    : "如果没有特别说明，请遵循大纲中的长度要求。否则，请撰写标准长度的章节。";
+  
+  let fullPrompt = `你是一位创意小说作家。${langInstruction}\n\n${layoutInstruction}\n${wordCountInstruction}\n\n背景上下文：${context}\n\n任务：${prompt}\n\n重要提示：仅输出小说正文内容。不要使用 JSON。不要包含标题或元对话。`;
+  
+  if (promptTemplate) {
+    fullPrompt = promptTemplate
+      .replace(/{context}/g, context)
+      .replace(/{task}/g, prompt)
+      .replace(/{langInstruction}/g, langInstruction)
+      .replace(/{layoutInstruction}/g, layoutInstruction)
+      .replace(/{wordCountInstruction}/g, wordCountInstruction) + "\n\n重要提示：仅输出小说正文内容。不要使用 JSON。不要包含标题或元对话。";
+  }
 
   if (config.provider === 'gemini') {
     const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
-    const systemInstruction = `You are a creative novel writer. ${layoutInstruction} ${langInstruction} 
-    STRICT RULE: Output ONLY the novel content. DO NOT include meta-talk, chapter summaries, or concluding remarks. 
-    If continuing from previous text, start exactly where it left off without repeating anything.`;
+    const systemInstruction = `你是一位创意小说作家。${layoutInstruction} ${langInstruction} 
+    严格规则：仅输出小说内容。不要包含元对话、章节摘要或结束语。
+    如果是接着之前的文本创作，请从上次停止的地方开始，不要重复任何内容。`;
 
     try {
       const response = await ai.models.generateContentStream({
@@ -173,7 +194,7 @@ export async function* generateAIContentStream(
       const stream = await openai.chat.completions.create({
         model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : "")),
         messages: [
-          { role: "system", content: `You are a creative novel writer. ${layoutInstruction} ${langInstruction} Output ONLY the novel content text.` },
+          { role: "system", content: `你是一位创意小说作家。${layoutInstruction} ${langInstruction} 仅输出小说正文内容。` },
           { role: "user", content: fullPrompt }
         ],
         temperature: 0.8,
@@ -194,9 +215,17 @@ export async function* generateAIContentStream(
   }
 }
 
-export async function generateAIOutline(title: string, genre: string, config: AIConfig, language: string = 'en') {
-  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
-  const fullPrompt = `Create a detailed novel outline for a ${genre} novel titled "${title}". ${langInstruction} Include main characters, plot points, and setting.`;
+export async function generateAIOutline(title: string, genre: string, config: AIConfig, language: string = 'en', promptTemplate?: string) {
+  const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
+  const defaultPrompt = `为一部名为《${title}》的 ${genre} 小说创作详细的大纲。${langInstruction} 包括主要角色、情节要点和世界设定。`;
+  
+  let fullPrompt = defaultPrompt;
+  if (promptTemplate) {
+    fullPrompt = promptTemplate
+      .replace(/{title}/g, title)
+      .replace(/{genre}/g, genre)
+      .replace(/{langInstruction}/g, langInstruction);
+  }
 
   if (config.provider === 'gemini') {
     const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
@@ -241,8 +270,8 @@ export async function generateAIOutline(title: string, genre: string, config: AI
 }
 
 export async function generateChapterTitle(content: string, config: AIConfig, language: string = 'en') {
-  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
-  const fullPrompt = `Based on the following novel chapter content, generate a concise and fitting chapter title. ${langInstruction}\n\nContent: ${content.slice(0, 2000)}\n\nTask: Output ONLY the title text. No quotes, no 'Chapter X', no leading dashes or dots, just the title.`;
+  const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
+  const fullPrompt = `根据以下小说章节内容，生成一个简明且贴切的章节标题。${langInstruction}\n\n内容：${content.slice(0, 2000)}\n\n任务：仅输出标题文本。不要带引号，不要带“第X章”，不要带前导破折号或点，仅输出标题。`;
 
   if (config.provider === 'gemini') {
     const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
@@ -280,9 +309,16 @@ export async function generateChapterTitle(content: string, config: AIConfig, la
   }
 }
 
-export async function generateChapterSummary(content: string, config: AIConfig, language: string = 'en') {
-  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
-  const fullPrompt = `Summarize the following novel chapter into a concise summary (max 200 words). Focus on character development, plot progress, and world-building details. ${langInstruction}\n\nContent: ${content}\n\nTask: Output ONLY the summary text.`;
+export async function generateChapterSummary(content: string, config: AIConfig, language: string = 'en', promptTemplate?: string) {
+  const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
+  const defaultPrompt = `将以下小说章节总结为简明摘要（最多 200 字）。重点关注角色发展、情节推进和世界观细节。${langInstruction}\n\n内容：${content}\n\n任务：仅输出摘要文本。`;
+  
+  let fullPrompt = defaultPrompt;
+  if (promptTemplate) {
+    fullPrompt = promptTemplate
+      .replace(/{content}/g, content)
+      .replace(/{langInstruction}/g, langInstruction);
+  }
 
   if (config.provider === 'gemini') {
     const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
@@ -323,7 +359,7 @@ export async function extractNovelMetadata(
   config: AIConfig, 
   language: string = 'en'
 ) {
-  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
+  const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   
   // Optimization: Smarter sampling for large novels
   let selectedChapters: Chapter[] = [];
@@ -345,28 +381,28 @@ export async function extractNovelMetadata(
 
   const chaptersContent = selectedChapters.map(c => {
     const content = c.summary || c.content.slice(0, 600);
-    return `Chapter ${c.title} (Index: ${chapters.indexOf(c) + 1}, ${c.summary ? 'Summary' : 'Excerpt'}):\n${content}`;
+    return `章节 ${c.title} (索引: ${chapters.indexOf(c) + 1}, ${c.summary ? '摘要' : '摘录'}):\n${content}`;
   }).join("\n\n");
   
-  const fullPrompt = `You are a creative editor. Based on the provided chapter summaries or excerpts, extract and update the novel's metadata. 
+  const fullPrompt = `你是一位创意编辑。根据提供的章节摘要或摘录，提取并更新小说的元数据。
   ${langInstruction}
   
-  Current Metadata:
-  Characters: ${currentMetadata.characters}
-  Storylines: ${currentMetadata.storylines}
-  World Setting: ${currentMetadata.world_setting}
-  Relationships: ${currentMetadata.relationships}
+  当前元数据：
+  角色：${currentMetadata.characters}
+  剧情线：${currentMetadata.storylines}
+  世界设定：${currentMetadata.world_setting}
+  人际关系：${currentMetadata.relationships}
   
-  Recent Chapter Info:
+  近期章节信息：
   ${chaptersContent}
   
-  Task: Analyze the chapters and update the metadata. 
-  - Characters: List main characters, their traits, and current status.
-  - Storylines: Summarize main plot points and active subplots.
-  - World Setting: Update geography, magic systems, or social rules introduced.
-  - Relationships: Describe the connections between characters (e.g., "A is B's mentor", "C and D are rivals").
+  任务：分析章节并更新元数据。
+  - 角色：列出主要角色、他们的特征和当前状态。
+  - 剧情线：总结主要情节要点和活跃的支线。
+  - 世界设定：更新引入的地理、魔法系统或社会规则。
+  - 人际关系：描述角色之间的联系（例如，“A 是 B 的导师”，“C 和 D 是竞争对手”）。
   
-  Return the response in JSON format.`;
+  以 JSON 格式返回响应。`;
 
   if (config.provider === 'gemini') {
     const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
@@ -380,10 +416,10 @@ export async function extractNovelMetadata(
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              characters: { type: Type.STRING },
-              storylines: { type: Type.STRING },
-              world_setting: { type: Type.STRING },
-              relationships: { type: Type.STRING }
+              characters: { type: Type.STRING, description: "角色信息" },
+              storylines: { type: Type.STRING, description: "剧情线信息" },
+              world_setting: { type: Type.STRING, description: "世界设定信息" },
+              relationships: { type: Type.STRING, description: "人际关系信息" }
             },
             required: ["characters", "storylines", "world_setting", "relationships"]
           }
@@ -407,7 +443,7 @@ export async function extractNovelMetadata(
       const response = await openai.chat.completions.create({
         model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : "")),
         messages: [
-          { role: "system", content: "You are a creative editor. Return your response in JSON format with 'characters', 'storylines', 'world_setting', and 'relationships' keys." },
+          { role: "system", content: "你是一位创意编辑。以 JSON 格式返回响应，包含 'characters'、'storylines'、'world_setting' 和 'relationships' 键。" },
           { role: "user", content: fullPrompt }
         ],
         response_format: { type: "json_object" },
@@ -423,21 +459,28 @@ export async function extractNovelMetadata(
   }
 }
 
-export async function refactorWorldSetting(content: string, config: AIConfig, language: string = 'en') {
-  const langInstruction = language === 'zh' ? "Please respond in Simplified Chinese." : "Please respond in English.";
-  const fullPrompt = `Refactor the following novel world setting content into a more structured markdown format. 
+export async function refactorWorldSetting(content: string, config: AIConfig, language: string = 'en', promptTemplate?: string) {
+  const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
+  const defaultPrompt = `将以下小说世界设定内容重构为更结构化的 markdown 格式。
   ${langInstruction}
   
-  Use bullet points and clear headings for:
-  - Geography & Environment
-  - Magic Systems / Power Systems
-  - History & Background
-  - Social Rules & Politics
-  - Other relevant aspects
+  使用项目符号和清晰的标题：
+  - 地理与环境
+  - 魔法系统 / 力量体系
+  - 历史与背景
+  - 社会规则与政治
+  - 其他相关方面
   
-  Content: ${content}
+  内容：${content}
   
-  Task: Output ONLY the refactored markdown text.`;
+  任务：仅输出重构后的 markdown 文本。`;
+
+  let fullPrompt = defaultPrompt;
+  if (promptTemplate) {
+    fullPrompt = promptTemplate
+      .replace(/{content}/g, content)
+      .replace(/{langInstruction}/g, langInstruction);
+  }
 
   if (config.provider === 'gemini') {
     const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });

@@ -74,6 +74,33 @@ export interface Platform {
   created_at: string;
 }
 
+export interface Prompt {
+  id: number;
+  name: string;
+  content: string;
+  type: 'outline' | 'chapter' | 'summary' | 'refactor' | 'polish';
+  is_default: number;
+  created_at: string;
+}
+
+export interface OperationLog {
+  id: number;
+  action: string;
+  details: string;
+  created_at: string;
+}
+
+export interface AIConfigDetail {
+  id: number;
+  provider: AIProvider;
+  model: string;
+  api_key: string;
+  base_url: string;
+  parameters: string; // JSON string
+  is_active: number;
+  created_at: string;
+}
+
 export interface ScheduledTask {
   id: number;
   type: 'generate' | 'publish';
