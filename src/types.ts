@@ -54,6 +54,7 @@ export interface AIConfig {
   model: string;
   apiKey?: string;
   baseUrl?: string;
+  parameters?: string; // JSON string
 }
 
 export type ContentLayout = 'standard' | 'web' | 'traditional';
@@ -107,6 +108,7 @@ export interface ScheduledTask {
   novel_id?: number;
   chapter_id?: number;
   platform_id?: number;
+  count?: number;
   scheduled_at: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   error?: string;

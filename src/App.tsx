@@ -28,7 +28,8 @@ import {
   Type,
   Cpu,
   Zap,
-  Activity
+  Activity,
+  Wand2
 } from "lucide-react";
 import { 
   LineChart, 
@@ -48,7 +49,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
 import { cn } from "./lib/utils";
 import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout, Platform, ScheduledTask, Prompt, OperationLog, AIConfigDetail } from "./types";
-import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, extractNovelMetadata, generateChapterSummary, refactorWorldSetting } from "./services/aiService";
+import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, generateChapterTitleFromOutline, extractNovelMetadata, generateChapterSummary, refactorWorldSetting } from "./services/aiService";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { translations, Language } from "./constants";
@@ -274,6 +275,9 @@ export default function App() {
   const [promptFilter, setPromptFilter] = useState<string>("all");
   const [selectedTemplates, setSelectedTemplates] = useState<Record<string, number>>({});
   const [logs, setLogs] = useState<OperationLog[]>([]);
+  const [logPage, setLogPage] = useState(1);
+  const [logTotalPages, setLogTotalPages] = useState(1);
+  const [logTotal, setLogTotal] = useState(0);
   const [aiConfigs, setAiConfigs] = useState<AIConfigDetail[]>([]);
   const [activeProvider, setActiveProvider] = useState<AIProvider>('gemini');
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -295,6 +299,7 @@ export default function App() {
   const [isGeneratingOutline, setIsGeneratingOutline] = useState(false);
   const [isSupplementing, setIsSupplementing] = useState(false);
   const [isRefactoringWorld, setIsRefactoringWorld] = useState(false);
+  const [isOutlinePreview, setIsOutlinePreview] = useState(false);
   const [editMode, setEditMode] = useState<{ [key: string]: boolean }>({});
 
   const toggleEditMode = (section: string) => {
@@ -313,7 +318,10 @@ export default function App() {
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [novelToDelete, setNovelToDelete] = useState<number | null>(null);
+  const [outlineToDelete, setOutlineToDelete] = useState<number | null>(null);
   const [chapterToDelete, setChapterToDelete] = useState<number | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [promptToDelete, setPromptToDelete] = useState<number | null>(null);
   const [newNovelTitle, setNewNovelTitle] = useState("");
   const [newNovelGenre, setNewNovelGenre] = useState("");
 
@@ -371,6 +379,8 @@ export default function App() {
 
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<Partial<Prompt> | null>(null);
+  const [isCreatingOutlineVersion, setIsCreatingOutlineVersion] = useState(false);
+  const [newOutlineVersionName, setNewOutlineVersionName] = useState("");
 
   useEffect(() => {
     localStorage.setItem("inkflow_ai_config", JSON.stringify(aiConfig));
@@ -474,16 +484,20 @@ export default function App() {
     }
   };
 
-  const handleDeletePrompt = async (id: number) => {
-    if (!confirm(t.confirmDeletePrompt || "确定要删除这个模板吗？")) return;
+  const handleDeletePrompt = (id: number) => {
+    setPromptToDelete(id);
+  };
+
+  const confirmDeletePrompt = async () => {
+    if (promptToDelete === null) return;
     try {
-      const res = await fetch(`/api/prompts/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/prompts/${promptToDelete}`, { method: "DELETE" });
       if (res.ok) {
         await fetchPrompts();
         setSelectedTemplates(prev => {
           const next = { ...prev };
           Object.keys(next).forEach(key => {
-            if (next[key] === id) delete next[key];
+            if (next[key] === promptToDelete) delete next[key];
           });
           return next;
         });
@@ -491,13 +505,21 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
+    } finally {
+      setPromptToDelete(null);
     }
   };
 
-  const fetchLogs = async () => {
+  const fetchLogs = async (page = 1) => {
     try {
-      const res = await fetch("/api/logs");
-      if (res.ok) setLogs(await res.json());
+      const res = await fetch(`/api/logs?page=${page}&limit=20`);
+      if (res.ok) {
+        const data = await res.json();
+        setLogs(data.logs);
+        setLogPage(data.page);
+        setLogTotalPages(data.totalPages);
+        setLogTotal(data.total);
+      }
     } catch (e) { console.error(e); }
   };
 
@@ -582,8 +604,9 @@ export default function App() {
       if (refactored) {
         await handleSaveNovelDetails({ world_setting: refactored });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error refactoring world setting:", error);
+      setToast({ message: error.message || "Failed to refactor world setting", type: 'error' });
     } finally {
       setIsRefactoringWorld(false);
     }
@@ -608,8 +631,9 @@ export default function App() {
       if (result) {
         await handleSaveNovelDetails(result);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to supplement novel metadata:", error);
+      setToast({ message: error.message || "Failed to update novel metadata", type: 'error' });
     } finally {
       setIsSupplementing(false);
     }
@@ -646,16 +670,23 @@ export default function App() {
   const handleCreateTask = async () => {
     if (!newTask.type || !newTask.scheduled_at) return;
     try {
+      // Convert to ISO string for consistent server-side processing
+      const taskData = {
+        ...newTask,
+        scheduled_at: new Date(newTask.scheduled_at).toISOString(),
+        count: newTask.count || 1
+      };
+
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newTask),
+        body: JSON.stringify(taskData),
       });
       if (!res.ok) throw new Error(t.createError || "Failed to create task");
       setShowTaskModal(false);
-      setNewTask({ type: 'generate' });
+      setNewTask({ type: 'generate', count: 1 });
       await fetchTasks();
-      setToast({ message: t.scheduleTask + " " + t.active, type: 'success' });
+      setToast({ message: t.taskCreated || "Task created", type: 'success' });
     } catch (e: any) {
       console.error(e);
       setToast({ message: e.message || "Failed to create task", type: 'error' });
@@ -667,7 +698,7 @@ export default function App() {
       const res = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(t.deleteError || "Failed to delete task");
       await fetchTasks();
-      setToast({ message: t.deleteError + " " + t.active, type: 'success' });
+      setToast({ message: t.taskDeleted || "Task deleted", type: 'success' });
     } catch (e: any) {
       console.error(e);
       setToast({ message: e.message || "Failed to delete task", type: 'error' });
@@ -703,6 +734,38 @@ export default function App() {
     } finally {
       setIsTesting(false);
     }
+  };
+
+  const handleResetSettings = () => {
+    setShowResetConfirm(true);
+  };
+
+  const confirmResetSettings = () => {
+    const defaultAIConfig: AIConfig = {
+      provider: "gemini",
+      model: "gemini-3-flash-preview",
+      apiKey: "",
+      baseUrl: "",
+      parameters: JSON.stringify({
+        temperature: 0.7,
+        max_tokens: 4000,
+        top_p: 0.95,
+        top_k: 40
+      })
+    };
+    const defaultWritingConfig: WritingConfig = {
+      minWords: 2000,
+      maxWords: 5000,
+      layout: "standard",
+      enforceWordCount: true,
+      autoSummarize: true
+    };
+    setAiConfig(defaultAIConfig);
+    setWritingConfig(defaultWritingConfig);
+    localStorage.setItem("inkflow_ai_config", JSON.stringify(defaultAIConfig));
+    localStorage.setItem("inkflow_writing_config", JSON.stringify(defaultWritingConfig));
+    setToast({ message: t.settingsSaved || "Settings reset to default", type: 'success' });
+    setShowResetConfirm(false);
   };
 
   const handleSaveAIConfig = async (config: any) => {
@@ -771,17 +834,28 @@ export default function App() {
 
   const handleCreateOutlineVersion = async () => {
     if (!selectedNovel) return;
+    if (!isCreatingOutlineVersion) {
+      setIsCreatingOutlineVersion(true);
+      setNewOutlineVersionName(`V${(selectedNovel.outlines?.length || 0) + 1}.0`);
+      return;
+    }
+    
+    if (!newOutlineVersionName.trim()) {
+      setIsCreatingOutlineVersion(false);
+      return;
+    }
+
     try {
-      const name = prompt(t.versionName, `V${(selectedNovel.outlines?.length || 0) + 1}.0`);
-      if (!name) return;
       const res = await fetch(`/api/novels/${selectedNovel.id}/outlines`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ version_name: name, content: activeOutline?.content || "" }),
+        body: JSON.stringify({ version_name: newOutlineVersionName, content: activeOutline?.content || "" }),
       });
       if (!res.ok) throw new Error(t.createError || "Failed to create outline version");
-      fetchNovelDetails(selectedNovel.id);
+      await fetchNovelDetails(selectedNovel.id);
       setToast({ message: t.newVersion + " " + t.active, type: 'success' });
+      setIsCreatingOutlineVersion(false);
+      setNewOutlineVersionName("");
     } catch (error: any) {
       console.error("Error creating outline version:", error);
       setToast({ message: error.message || "Failed to create outline version", type: 'error' });
@@ -800,6 +874,26 @@ export default function App() {
     } catch (error: any) {
       console.error("Error activating outline:", error);
       setToast({ message: error.message || "Failed to activate outline", type: 'error' });
+    }
+  };
+
+  const handleDeleteOutlineVersion = async (id: number) => {
+    setOutlineToDelete(id);
+  };
+
+  const confirmDeleteOutline = async () => {
+    if (!selectedNovel || outlineToDelete === null) return;
+    try {
+      const res = await fetch(`/api/outlines/${outlineToDelete}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(t.deleteError || "Failed to delete outline version");
+      fetchNovelDetails(selectedNovel.id);
+      setToast({ message: t.deleteSuccess || "Deleted successfully", type: 'success' });
+      setOutlineToDelete(null);
+    } catch (error: any) {
+      console.error("Error deleting outline version:", error);
+      setToast({ message: error.message || "Failed to delete outline version", type: 'error' });
     }
   };
 
@@ -1096,7 +1190,12 @@ export default function App() {
     try {
       const nextChapterNum = chapters.length + 1;
       const activeOutlineContent = selectedNovel.outlines?.find(o => o.is_active === 1)?.content || "";
-      const outlineTitle = getChapterTitleFromOutline(activeOutlineContent, nextChapterNum);
+      let outlineTitle = getChapterTitleFromOutline(activeOutlineContent, nextChapterNum);
+      
+      if (!outlineTitle && activeOutlineContent) {
+        setToast({ message: "Generating chapter title from outline...", type: 'success' });
+        outlineTitle = await generateChapterTitleFromOutline(activeOutlineContent, nextChapterNum, aiConfig, lang);
+      }
       
       const title = outlineTitle || `${t.chapters} ${nextChapterNum}`;
       const res = await fetch("/api/chapters", {
@@ -1178,7 +1277,11 @@ export default function App() {
         const nextChapterNum = currentChapters.length + 1;
         
         // Try to find title in outline
-        const outlineTitle = getChapterTitleFromOutline(activeOutlineContent, nextChapterNum);
+        let outlineTitle = getChapterTitleFromOutline(activeOutlineContent, nextChapterNum);
+
+        if (!outlineTitle && activeOutlineContent) {
+          outlineTitle = await generateChapterTitleFromOutline(activeOutlineContent, nextChapterNum, aiConfig, lang);
+        }
 
         const defaultTitle = outlineTitle || `${t.chapters} ${nextChapterNum}`;
         
@@ -1500,6 +1603,99 @@ export default function App() {
             </motion.div>
           </div>
         )}
+
+        {outlineToDelete !== null && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl"
+            >
+              <div className="w-12 h-12 bg-rose-500/10 text-rose-500 rounded-xl flex items-center justify-center mb-6">
+                <Trash2 size={24} />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">{t.delete}</h3>
+              <p className="text-zinc-400 mb-8">{t.deleteConfirm}</p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setOutlineToDelete(null)}
+                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={confirmDeleteOutline}
+                  className="flex-1 py-3 bg-rose-500 hover:bg-rose-400 text-white font-bold rounded-xl transition-all"
+                >
+                  确认删除
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showResetConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl"
+            >
+              <div className="w-12 h-12 bg-amber-500/10 text-amber-500 rounded-xl flex items-center justify-center mb-6">
+                <Activity size={24} />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">{t.resetSettings}</h3>
+              <p className="text-zinc-400 mb-8">{t.confirmReset}</p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowResetConfirm(false)}
+                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={confirmResetSettings}
+                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-white font-bold rounded-xl transition-all"
+                >
+                  确认重置
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {promptToDelete !== null && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl"
+            >
+              <div className="w-12 h-12 bg-rose-500/10 text-rose-500 rounded-xl flex items-center justify-center mb-6">
+                <Trash2 size={24} />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">{t.deletePrompt || "删除模板"}</h3>
+              <p className="text-zinc-400 mb-8">{t.confirmDeletePrompt || "确定要删除这个模板吗？"}</p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setPromptToDelete(null)}
+                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={confirmDeletePrompt}
+                  className="flex-1 py-3 bg-rose-500 hover:bg-rose-400 text-white font-bold rounded-xl transition-all"
+                >
+                  确认删除
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
 
       {/* Batch Generate Modal */}
@@ -1512,7 +1708,10 @@ export default function App() {
               exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl"
             >
-              <h3 className="text-2xl font-bold text-white mb-6">{t.batchGenerate}</h3>
+              <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+                <Wand2 className="text-emerald-500" />
+                {t.batchGenerate}
+              </h3>
               <div className="space-y-4 mb-8">
                 <label className="block text-sm text-zinc-500 mb-2">
                   {t.generateCount} 
@@ -1987,7 +2186,7 @@ export default function App() {
                             className="flex-1 py-2 border border-dashed border-zinc-700 hover:border-emerald-500/50 text-zinc-500 hover:text-emerald-400 rounded-lg flex items-center justify-center gap-2 transition-all"
                             title={t.batchGenerate}
                           >
-                            <Sparkles size={16} />
+                            <Wand2 size={16} />
                           </button>
                         </>
                       )}
@@ -2154,13 +2353,13 @@ export default function App() {
                             </button>
                           </div>
 
-                          <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-xl">
+                          <div className="flex items-center gap-4 ml-auto">
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-xl shrink-0">
                               <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
                               <span className="text-[10px] text-emerald-500/70 font-mono font-bold">{aiConfig.model}</span>
                             </div>
 
-                            <div className="text-[10px] text-zinc-600 font-medium italic flex items-center gap-2 shrink-0">
+                            <div className="text-[10px] text-zinc-600 font-medium italic flex items-center gap-2 whitespace-nowrap">
                               {isSaving ? (
                                 <>
                                   <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
@@ -2197,77 +2396,142 @@ export default function App() {
                     className="flex-1 flex flex-col" 
                     title={t.novelOutline}
                     headerAction={
-                      <button 
-                        onClick={handleSaveOutline}
-                        className="p-1.5 hover:bg-zinc-800 rounded-lg text-emerald-400 transition-all"
-                        title={t.save}
-                      >
-                        <Save size={16} />
-                      </button>
+                      <div className="flex gap-1">
+                        <button 
+                          onClick={handleSaveOutline}
+                          className="p-1.5 hover:bg-zinc-800 rounded-lg text-emerald-400 transition-all"
+                          title={t.save}
+                        >
+                          <Save size={16} />
+                        </button>
+                        <button 
+                          onClick={handleCreateOutlineVersion}
+                          className={cn(
+                            "p-1.5 rounded-lg transition-all",
+                            isCreatingOutlineVersion ? "bg-emerald-500 text-white" : "hover:bg-zinc-800 text-zinc-400 hover:text-emerald-400"
+                          )}
+                          title={t.newVersion}
+                        >
+                          {isCreatingOutlineVersion ? <Save size={16} /> : <Plus size={16} />}
+                        </button>
+                        {isCreatingOutlineVersion && (
+                          <button 
+                            onClick={() => setIsCreatingOutlineVersion(false)}
+                            className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-rose-400 transition-all"
+                            title={t.cancel}
+                          >
+                            <X size={16} />
+                          </button>
+                        )}
+                      </div>
                     }
                   >
-                    {activeOutline ? (
-                      <div className="flex flex-col h-full gap-4">
-                        <div className="flex items-center justify-between">
-                          <select 
-                            value={activeOutline.id || ""}
-                            onChange={(e) => {
-                              const selected = selectedNovel.outlines?.find(o => o.id === parseInt(e.target.value));
-                              if (selected) setActiveOutline(selected);
-                            }}
-                            className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-300 focus:outline-none"
-                          >
-                            {selectedNovel.outlines?.map(o => (
-                              <option key={o.id} value={o.id}>{o.version_name} {o.is_active ? `(${t.activeVersion})` : ""}</option>
-                            ))}
-                          </select>
-                          <div className="flex gap-1 items-center">
-                            <TemplateSelector 
-                              type="outline"
-                              prompts={prompts}
-                              selectedId={selectedTemplates['outline']}
-                              onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, outline: id }))}
-                              onDelete={handleDeletePrompt}
-                              t={t}
-                            />
-                            <button 
-                              onClick={handleAIGenerateOutline}
-                              disabled={isGeneratingOutline}
-                              className="p-1 hover:bg-zinc-800 rounded text-zinc-500 hover:text-emerald-400 disabled:opacity-50"
-                              title={t.generateOutline}
-                            >
-                              <Sparkles size={14} className={isGeneratingOutline ? "animate-pulse" : ""} />
-                            </button>
-                            {!activeOutline.is_active && (
-                              <button 
-                                onClick={() => handleActivateOutline(activeOutline.id)}
-                                className="p-1 hover:bg-zinc-800 rounded text-zinc-500 hover:text-emerald-400"
-                                title={t.activate}
+                    <div className="flex flex-col h-full gap-4">
+                      {isCreatingOutlineVersion && (
+                        <div className="flex flex-col gap-2 p-3 bg-zinc-800/30 rounded-xl border border-emerald-500/20">
+                          <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-wider">{t.versionName}</span>
+                          <input 
+                            autoFocus
+                            value={newOutlineVersionName}
+                            onChange={(e) => setNewOutlineVersionName(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleCreateOutlineVersion()}
+                            className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50 transition-all"
+                            placeholder="e.g. V2.0"
+                          />
+                        </div>
+                      )}
+                      {selectedNovel.outlines && selectedNovel.outlines.length > 0 ? (
+                        <>
+                          <div className="flex flex-col gap-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <select 
+                                value={activeOutline?.id || ""}
+                                onChange={(e) => {
+                                  const selected = selectedNovel.outlines?.find(o => o.id === parseInt(e.target.value));
+                                  if (selected) setActiveOutline(selected);
+                                }}
+                                className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-300 focus:outline-none"
                               >
-                                <TrendingUp size={14} />
+                                {selectedNovel.outlines?.map(o => (
+                                  <option key={o.id} value={o.id}>{o.version_name} {o.is_active ? `(${t.activeVersion})` : ""}</option>
+                                ))}
+                              </select>
+                              <div className="flex gap-1">
+                                {activeOutline && (
+                                  <button 
+                                    onClick={() => handleDeleteOutlineVersion(activeOutline.id)}
+                                    className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-rose-400 transition-colors"
+                                    title={t.delete}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                                {activeOutline && !activeOutline.is_active && (
+                                  <button 
+                                    onClick={() => handleActivateOutline(activeOutline.id)}
+                                    className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-emerald-400"
+                                    title={t.activate}
+                                  >
+                                    <TrendingUp size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between px-1">
+                              <div className="flex gap-2 items-center">
+                                <TemplateSelector 
+                                  type="outline"
+                                  prompts={prompts}
+                                  selectedId={selectedTemplates['outline']}
+                                  onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, outline: id }))}
+                                  onDelete={handleDeletePrompt}
+                                  t={t}
+                                />
+                                <button 
+                                  onClick={() => setIsOutlinePreview(true)}
+                                  className="p-1.5 rounded-lg transition-colors hover:bg-zinc-800 text-zinc-500 hover:text-emerald-400"
+                                  title={t.previewOutline}
+                                >
+                                  <Eye size={14} />
+                                </button>
+                              </div>
+                              <button 
+                                onClick={handleAIGenerateOutline}
+                                disabled={isGeneratingOutline}
+                                className="flex items-center gap-1.5 px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg text-emerald-400 text-[10px] font-bold transition-all disabled:opacity-50"
+                              >
+                                <Sparkles size={12} className={isGeneratingOutline ? "animate-pulse" : ""} />
+                                {t.generateOutline}
+                              </button>
+                            </div>
+                          </div>
+                          <textarea 
+                            value={activeOutline?.content || ""}
+                            onChange={(e) => activeOutline && setActiveOutline({...activeOutline, content: e.target.value})}
+                            placeholder={t.outlinePlaceholder}
+                            className="flex-1 bg-transparent border-none text-sm text-zinc-400 leading-relaxed focus:outline-none resize-none scrollbar-hide"
+                          />
+                        </>
+                      ) : (
+                        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+                          <div className="p-4 rounded-full bg-zinc-800/50 text-zinc-600">
+                            <FileText size={32} />
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm text-zinc-500 italic mb-4">{t.noOutlineVersions || "No outline versions found"}</p>
+                            {!isCreatingOutlineVersion && (
+                              <button 
+                                onClick={handleCreateOutlineVersion}
+                                className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20"
+                              >
+                                <Plus size={14} />
+                                {t.newVersion}
                               </button>
                             )}
-                            <button 
-                              onClick={handleCreateOutlineVersion}
-                              className="p-1 hover:bg-zinc-800 rounded text-zinc-500 hover:text-emerald-400"
-                              title={t.newVersion}
-                            >
-                              <Plus size={14} />
-                            </button>
                           </div>
                         </div>
-                        <textarea 
-                          value={activeOutline.content || ""}
-                          onChange={(e) => setActiveOutline({...activeOutline, content: e.target.value})}
-                          placeholder={t.outlinePlaceholder}
-                          className="flex-1 bg-transparent border-none text-sm text-zinc-400 leading-relaxed focus:outline-none resize-none"
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex-1 flex items-center justify-center text-zinc-600 italic text-xs">
-                        No outline versions found
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </Card>
                 </div>
               </div>
@@ -2981,6 +3245,33 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
+
+                {logTotalPages > 1 && (
+                  <div className="p-4 border-t border-zinc-800 flex items-center justify-between">
+                    <div className="text-xs text-zinc-500">
+                      {t.total}: {logTotal}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => fetchLogs(logPage - 1)}
+                        disabled={logPage === 1}
+                        className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-xs font-medium transition-colors"
+                      >
+                        {t.prevPage}
+                      </button>
+                      <span className="text-xs text-zinc-400">
+                        {t.page} {logPage} {t.of} {logTotalPages}
+                      </span>
+                      <button
+                        onClick={() => fetchLogs(logPage + 1)}
+                        disabled={logPage === logTotalPages}
+                        className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-xs font-medium transition-colors"
+                      >
+                        {t.nextPage}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </Card>
             </motion.div>
           )}
@@ -3035,7 +3326,14 @@ export default function App() {
                           is_active: 0
                         };
 
-                        const params = JSON.parse(config.parameters || '{}');
+                        const parsedParams = JSON.parse(config.parameters || '{}') || {};
+                        const params = {
+                          temperature: 0.7,
+                          top_p: 0.9,
+                          top_k: 40,
+                          max_tokens: 4096,
+                          ...parsedParams
+                        };
 
                         return (
                           <div className="space-y-6">
@@ -3123,6 +3421,44 @@ export default function App() {
                                     value={params.top_p || 0.9}
                                     onChange={(e) => {
                                       const newParams = { ...params, top_p: parseFloat(e.target.value) };
+                                      const newConfigs = [...aiConfigs];
+                                      const idx = newConfigs.findIndex(c => c.provider === activeProvider);
+                                      if (idx > -1) newConfigs[idx].parameters = JSON.stringify(newParams);
+                                      else newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      setAiConfigs(newConfigs);
+                                    }}
+                                    className="w-full accent-emerald-500"
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-zinc-500">{t.maxTokens}</label>
+                                    <span className="text-xs text-emerald-400">{params.max_tokens}</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="100" max="16384" step="100" 
+                                    value={params.max_tokens || 4096}
+                                    onChange={(e) => {
+                                      const newParams = { ...params, max_tokens: parseInt(e.target.value) };
+                                      const newConfigs = [...aiConfigs];
+                                      const idx = newConfigs.findIndex(c => c.provider === activeProvider);
+                                      if (idx > -1) newConfigs[idx].parameters = JSON.stringify(newParams);
+                                      else newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      setAiConfigs(newConfigs);
+                                    }}
+                                    className="w-full accent-emerald-500"
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <div className="flex justify-between">
+                                    <label className="text-xs text-zinc-500">{t.topK}</label>
+                                    <span className="text-xs text-emerald-400">{params.top_k}</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="1" max="100" step="1" 
+                                    value={params.top_k || 40}
+                                    onChange={(e) => {
+                                      const newParams = { ...params, top_k: parseInt(e.target.value) };
                                       const newConfigs = [...aiConfigs];
                                       const idx = newConfigs.findIndex(c => c.provider === activeProvider);
                                       if (idx > -1) newConfigs[idx].parameters = JSON.stringify(newParams);
@@ -3333,20 +3669,28 @@ export default function App() {
                   </div>
 
                   <div className="pt-4">
-                    <button
-                      onClick={() => {
-                        try {
-                          localStorage.setItem("inkflow_ai_config", JSON.stringify(aiConfig));
-                          localStorage.setItem("inkflow_writing_config", JSON.stringify(writingConfig));
-                          setToast({ message: t.settingsSaved || "Settings saved", type: 'success' });
-                        } catch (e) {
-                          setToast({ message: "Failed to save settings", type: 'error' });
-                        }
-                      }}
-                      className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20"
-                    >
-                      {t.saveSettings}
-                    </button>
+                    <div className="flex gap-4">
+                      <button
+                        onClick={handleResetSettings}
+                        className="flex-1 py-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 font-bold rounded-xl transition-all border border-zinc-700"
+                      >
+                        {t.resetSettings || "Reset All"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          try {
+                            localStorage.setItem("inkflow_ai_config", JSON.stringify(aiConfig));
+                            localStorage.setItem("inkflow_writing_config", JSON.stringify(writingConfig));
+                            setToast({ message: t.settingsSaved || "Settings saved", type: 'success' });
+                          } catch (e) {
+                            setToast({ message: "Failed to save settings", type: 'error' });
+                          }
+                        }}
+                        className="flex-[2] py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20"
+                      >
+                        {t.saveSettings}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </Card>
@@ -3404,6 +3748,20 @@ export default function App() {
                     className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
                   />
                 </div>
+
+                {newTask.type === 'generate' && (
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-400 mb-2">{t.generateCount}</label>
+                    <input 
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={newTask.count || 1}
+                      onChange={(e) => setNewTask({ ...newTask, count: parseInt(e.target.value) })}
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                    />
+                  </div>
+                )}
 
                 <div className="flex gap-4 mt-8">
                   <button 
@@ -3514,6 +3872,59 @@ export default function App() {
                 <button
                   onClick={handleSavePrompt}
                   className="px-8 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all"
+                >
+                  {t.confirm}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isOutlinePreview && activeOutline && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-12">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsOutlinePreview(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-5xl h-full max-h-[90vh] bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden"
+            >
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50 backdrop-blur-md">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                    <Eye size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white">{t.previewOutline}</h3>
+                    <p className="text-xs text-zinc-500">{activeOutline.version_name}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsOutlinePreview(false)}
+                  className="w-10 h-10 rounded-full hover:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:text-white transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-8 md:p-12 prose prose-invert prose-emerald max-w-none scrollbar-thin scrollbar-thumb-zinc-800">
+                <Markdown remarkPlugins={[remarkGfm]}>
+                  {activeOutline.content || ""}
+                </Markdown>
+              </div>
+
+              <div className="p-6 bg-zinc-800/30 border-t border-zinc-800 flex justify-end">
+                <button
+                  onClick={() => setIsOutlinePreview(false)}
+                  className="px-8 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20"
                 >
                   {t.confirm}
                 </button>

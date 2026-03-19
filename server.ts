@@ -113,6 +113,7 @@ db.exec(`
     novel_id INTEGER,
     chapter_id INTEGER,
     platform_id INTEGER,
+    count INTEGER DEFAULT 1,
     scheduled_at DATETIME NOT NULL,
     status TEXT DEFAULT 'pending', -- 'pending', 'running', 'completed', 'failed'
     error TEXT,
@@ -139,6 +140,17 @@ try { db.prepare("ALTER TABLE novels ADD COLUMN relationships TEXT").run(); } ca
 try { db.prepare("ALTER TABLE chapters ADD COLUMN summary TEXT").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE chapters ADD COLUMN scheduled_at DATETIME").run(); } catch (e) {}
 
+try { db.prepare("ALTER TABLE tasks ADD COLUMN count INTEGER DEFAULT 1").run(); } catch (e) {}
+
+// Insert default AI config if not exists
+const defaultAI = db.prepare("SELECT id FROM ai_configs WHERE provider = 'gemini'").get();
+if (!defaultAI) {
+  db.prepare(`
+    INSERT INTO ai_configs (provider, model, api_key, is_active) 
+    VALUES (?, ?, ?, 1)
+  `).run('gemini', 'gemini-3-flash-preview', process.env.GEMINI_API_KEY || '');
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -158,22 +170,22 @@ async function startServer() {
   const promptCount = db.prepare("SELECT COUNT(*) as count FROM prompts").get().count;
   if (promptCount === 0) {
     const defaultPrompts = [
-      { name: '标准章节生成', type: 'chapter', content: '请为小说《{title}》创作第 {chapter_num} 章。重点是根据大纲推进情节。保持已建立的角色语气和世界设定。', is_default: 1 },
-      { name: '快节奏网文', type: 'chapter', content: '请为小说《{title}》创作第 {chapter_num} 章。使用快节奏的网文风格，段落简短，对话紧凑，充满悬念。', is_default: 0 },
-      { name: '细腻文学风', type: 'chapter', content: '请为小说《{title}》创作第 {chapter_num} 章。注重环境描写和心理活动，语言优美细腻，节奏平缓。', is_default: 0 },
+      { name: '标准章节生成', type: 'chapter', content: '请根据以下背景和任务进行创作。\n\n背景上下文：\n{context}\n\n任务：\n{task}', is_default: 1 },
+      { name: '快节奏网文', type: 'chapter', content: '使用快节奏的网文风格，段落简短，对话紧凑，充满悬念。\n\n背景上下文：\n{context}\n\n任务：\n{task}', is_default: 0 },
+      { name: '细腻文学风', type: 'chapter', content: '注重环境描写和心理活动，语言优美细腻，节奏平缓。\n\n背景上下文：\n{context}\n\n任务：\n{task}', is_default: 0 },
       
-      { name: '标准大纲优化', type: 'outline', content: '优化小说《{title}》的以下大纲。确保逻辑连贯和引人入胜的角色弧线。', is_default: 1 },
-      { name: '冲突强化大纲', type: 'outline', content: '分析并优化小说《{title}》的大纲，增加更多的冲突点和反转，提高故事的张力。', is_default: 0 },
+      { name: '标准大纲优化', type: 'outline', content: '优化以下大纲。确保逻辑连贯和引人入胜的角色弧线。\n\n大纲内容：\n{context}', is_default: 1 },
+      { name: '冲突强化大纲', type: 'outline', content: '分析并优化以下大纲，增加更多的冲突点和反转，提高故事的张力。\n\n大纲内容：\n{context}', is_default: 0 },
       
-      { name: '简明摘要', type: 'summary', content: '对以下章节内容提供简明摘要，突出关键情节和角色发展。', is_default: 1 },
-      { name: '详细剧情回顾', type: 'summary', content: '详细总结本章的剧情走向、角色变动和伏笔设置，为后续创作提供参考。', is_default: 0 },
+      { name: '简明摘要', type: 'summary', content: '对以下章节内容提供简明摘要，突出关键情节和角色发展。\n\n章节内容：\n{context}', is_default: 1 },
+      { name: '详细剧情回顾', type: 'summary', content: '详细总结本章的剧情走向、角色变动和伏笔设置，为后续创作提供参考。\n\n章节内容：\n{context}', is_default: 0 },
       
-      { name: '标准结构化', type: 'refactor', content: '将以下小说世界设定内容重构为更结构化的 markdown 格式。使用项目符号和清晰的标题。', is_default: 1 },
-      { name: '深度设定扩展', type: 'refactor', content: '在保持原有设定的基础上，对以下世界观内容进行深度扩展和逻辑补全，使其更加严谨。', is_default: 0 },
+      { name: '标准结构化', type: 'refactor', content: '将以下小说世界设定内容重构为更结构化的 markdown 格式。使用项目符号和清晰的标题。\n\n设定内容：\n{context}', is_default: 1 },
+      { name: '深度设定扩展', type: 'refactor', content: '在保持原有设定的基础上，对以下世界观内容进行深度扩展和逻辑补全，使其更加严谨。\n\n设定内容：\n{context}', is_default: 0 },
       
-      { name: '标准润色', type: 'polish', content: '请对以下小说片段进行润色。在保持原意和情节的基础上，优化遣词造句，增强画面感和感染力。', is_default: 1 },
-      { name: '风格转换 (古风)', type: 'polish', content: '将以下小说片段重构为唯美古风风格。使用更具古典韵味的词汇，增加意境描写。', is_default: 0 },
-      { name: '情节扩充', type: 'polish', content: '在保持原有情节走向的基础上，对以下片段进行扩充。增加更多的细节描写、心理活动和环境渲染，使内容更丰满。', is_default: 0 }
+      { name: '标准润色', type: 'polish', content: '请对以下小说片段进行润色。在保持原意和情节的基础上，优化遣词造句，增强画面感和感染力。\n\n片段内容：\n{context}', is_default: 1 },
+      { name: '风格转换 (古风)', type: 'polish', content: '将以下小说片段重构为唯美古风风格。使用更具古典韵味的词汇，增加意境描写。\n\n片段内容：\n{context}', is_default: 0 },
+      { name: '情节扩充', type: 'polish', content: '在保持原有情节走向的基础上，对以下片段进行扩充。增加更多的细节描写、心理活动和环境渲染，使内容更丰满。\n\n片段内容：\n{context}', is_default: 0 }
     ];
     const insertPrompt = db.prepare("INSERT INTO prompts (name, type, content, is_default) VALUES (?, ?, ?, ?)");
     defaultPrompts.forEach(p => insertPrompt.run(p.name, p.type, p.content, p.is_default));
@@ -182,16 +194,50 @@ async function startServer() {
     // Migration: Update existing prompts or add new defaults if missing
     const hasRefactor = db.prepare("SELECT id FROM prompts WHERE type = 'refactor'").get();
     if (!hasRefactor) {
-      db.prepare("INSERT INTO prompts (name, type, content, is_default) VALUES (?, ?, ?, ?)")
-        .run('标准结构化', 'refactor', '将以下小说世界设定内容重构为更结构化的 markdown 格式。使用项目符号和清晰的标题。', 1);
+      const refactorPrompts = [
+        { name: '标准结构化', type: 'refactor', content: '将以下小说世界设定内容重构为更结构化的 markdown 格式。使用项目符号和清晰的标题。\n\n设定内容：\n{context}', is_default: 1 },
+        { name: '深度设定扩展', type: 'refactor', content: '在保持原有设定的基础上，对以下世界观内容进行深度扩展和逻辑补全，使其更加严谨。\n\n设定内容：\n{context}', is_default: 0 }
+      ];
+      const insertPrompt = db.prepare("INSERT INTO prompts (name, type, content, is_default) VALUES (?, ?, ?, ?)");
+      refactorPrompts.forEach(p => insertPrompt.run(p.name, p.type, p.content, p.is_default));
     }
+
+    const hasPolish = db.prepare("SELECT id FROM prompts WHERE type = 'polish'").get();
+    if (!hasPolish) {
+      const polishPrompts = [
+        { name: '标准润色', type: 'polish', content: '请对以下小说片段进行润色。在保持原意和情节的基础上，优化遣词造句，增强画面感和感染力。\n\n片段内容：\n{context}', is_default: 1 },
+        { name: '风格转换 (古风)', type: 'polish', content: '将以下小说片段重构为唯美古风风格。使用更具古典韵味的词汇，增加意境描写。\n\n片段内容：\n{context}', is_default: 0 },
+        { name: '情节扩充', type: 'polish', content: '在保持原有情节走向的基础上，对以下片段进行扩充。增加更多的细节描写、心理活动和环境渲染，使内容更丰满。\n\n片段内容：\n{context}', is_default: 0 }
+      ];
+      const insertPrompt = db.prepare("INSERT INTO prompts (name, type, content, is_default) VALUES (?, ?, ?, ?)");
+      polishPrompts.forEach(p => insertPrompt.run(p.name, p.type, p.content, p.is_default));
+    }
+
+    // Update existing prompts to use {context} and {task} if they use old placeholders
+    const existingPrompts = db.prepare("SELECT id, content FROM prompts").all() as { id: number, content: string }[];
+    const updatePrompt = db.prepare("UPDATE prompts SET content = ? WHERE id = ?");
     
-    // Add some more defaults if they don't exist
-    const hasFastChapter = db.prepare("SELECT id FROM prompts WHERE name = '快节奏网文'").get();
-    if (!hasFastChapter) {
-      db.prepare("INSERT INTO prompts (name, type, content, is_default) VALUES (?, ?, ?, ?)")
-        .run('快节奏网文', 'chapter', '请为小说《{title}》创作第 {chapter_num} 章。使用快节奏的网文风格，段落简短，对话紧凑，充满悬念。', 0);
-    }
+    existingPrompts.forEach(p => {
+      let newContent = p.content;
+      let changed = false;
+
+      // Replace old placeholders with new ones
+      if (newContent.includes('{title}') || newContent.includes('{chapter_num}')) {
+        // If it's a chapter prompt, we should probably wrap it in the new format
+        if (!newContent.includes('{context}') && !newContent.includes('{task}')) {
+          newContent = `${newContent}\n\n背景上下文：\n{context}\n\n任务：\n{task}`;
+          changed = true;
+        }
+      } else if (!newContent.includes('{context}') && !newContent.includes('{task}')) {
+        // For other types, just append {context}
+        newContent = `${newContent}\n\n内容：\n{context}`;
+        changed = true;
+      }
+
+      if (changed) {
+        updatePrompt.run(newContent, p.id);
+      }
+    });
   }
 
   // Insert default AI config if not exists
@@ -272,18 +318,27 @@ async function startServer() {
 
   app.patch("/api/prompts/:id", (req, res) => {
     const { name, content, type, is_default } = req.body;
-    if (is_default) {
-      const prompt = db.prepare("SELECT type FROM prompts WHERE id = ?").get(req.params.id);
-      db.prepare("UPDATE prompts SET is_default = 0 WHERE type = ?").run(prompt.type);
+    
+    const currentPrompt = db.prepare("SELECT type, is_default FROM prompts WHERE id = ?").get(req.params.id);
+    if (!currentPrompt) return res.status(404).json({ error: "Prompt not found" });
+
+    const targetType = type || currentPrompt.type;
+    const targetIsDefault = is_default !== undefined ? (is_default ? 1 : 0) : currentPrompt.is_default;
+
+    if (targetIsDefault === 1) {
+      // Clear other defaults for the target category
+      db.prepare("UPDATE prompts SET is_default = 0 WHERE type = ? AND id != ?").run(targetType, req.params.id);
     }
+
     db.prepare(`
       UPDATE prompts 
       SET name = COALESCE(?, name), 
           content = COALESCE(?, content), 
           type = COALESCE(?, type), 
-          is_default = COALESCE(?, is_default) 
+          is_default = ? 
       WHERE id = ?
-    `).run(name, content, type, is_default !== undefined ? (is_default ? 1 : 0) : null, req.params.id);
+    `).run(name, content, type, targetIsDefault, req.params.id);
+    
     logOperation("更新提示词", { ID: req.params.id });
     res.json({ success: true });
   });
@@ -296,8 +351,19 @@ async function startServer() {
 
   // Operation Logs
   app.get("/api/logs", (req, res) => {
-    const logs = db.prepare("SELECT * FROM operation_logs ORDER BY created_at DESC LIMIT 100").all();
-    res.json(logs);
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const offset = (page - 1) * limit;
+
+    const total = db.prepare("SELECT COUNT(*) as count FROM operation_logs").get() as { count: number };
+    const logs = db.prepare("SELECT * FROM operation_logs ORDER BY created_at DESC LIMIT ? OFFSET ?").all(limit, offset);
+    
+    res.json({
+      logs,
+      total: total.count,
+      page,
+      totalPages: Math.ceil(total.count / limit)
+    });
   });
 
   // AI Configs
@@ -466,6 +532,23 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.delete("/api/outlines/:id", (req, res) => {
+    const outline = db.prepare("SELECT novel_id, is_active FROM outline_versions WHERE id = ?").get(req.params.id) as { novel_id: number, is_active: number };
+    if (outline) {
+      db.prepare("DELETE FROM outline_versions WHERE id = ?").run(req.params.id);
+      logOperation("删除大纲版本", { ID: req.params.id });
+      
+      // If the deleted version was active, activate another one if available
+      if (outline.is_active) {
+        const another = db.prepare("SELECT id FROM outline_versions WHERE novel_id = ? LIMIT 1").get(outline.novel_id) as { id: number };
+        if (another) {
+          db.prepare("UPDATE outline_versions SET is_active = 1 WHERE id = ?").run(another.id);
+        }
+      }
+    }
+    res.json({ success: true });
+  });
+
   app.post("/api/chapters", (req, res) => {
     const { novel_id, title, content, token_usage, scheduled_at } = req.body;
     const word_count = content ? content.length : 0;
@@ -535,11 +618,11 @@ async function startServer() {
   });
 
   app.post("/api/tasks", (req, res) => {
-    const { type, novel_id, chapter_id, platform_id, scheduled_at } = req.body;
+    const { type, novel_id, chapter_id, platform_id, scheduled_at, count } = req.body;
     const info = db.prepare(`
-      INSERT INTO tasks (type, novel_id, chapter_id, platform_id, scheduled_at, status)
-      VALUES (?, ?, ?, ?, ?, 'pending')
-    `).run(type, novel_id, chapter_id, platform_id, scheduled_at);
+      INSERT INTO tasks (type, novel_id, chapter_id, platform_id, scheduled_at, count, status)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending')
+    `).run(type, novel_id, chapter_id, platform_id, scheduled_at, count || 1);
     res.json({ id: info.lastInsertRowid });
   });
 
@@ -570,6 +653,7 @@ async function startServer() {
   // Scheduled Tasks Processor
   cron.schedule("* * * * *", async () => {
     const now = new Date().toISOString();
+    console.log(`[Cron] Checking tasks at ${now}`);
     
     // 1. Process legacy scheduled chapters (Publishing)
     const pendingChapters = db.prepare("SELECT * FROM chapters WHERE status = 'draft' AND scheduled_at <= ?").all(now);
@@ -580,30 +664,44 @@ async function startServer() {
     }
 
     // 2. Process new Tasks table
-    const pendingTasks = db.prepare("SELECT * FROM tasks WHERE status = 'pending' AND scheduled_at <= ?").all(now);
+    // Use a more flexible date comparison or ensure frontend sends ISO strings
+    const pendingTasks = db.prepare("SELECT * FROM tasks WHERE status = 'pending'").all();
     
-    for (const task of pendingTasks) {
-      console.log(`[Cron] Processing task ${task.id}: ${task.type}`);
-      logOperation("任务开始", { 任务ID: task.id, 类型: task.type });
-      db.prepare("UPDATE tasks SET status = 'running' WHERE id = ?").run(task.id);
+    if (pendingTasks.length > 0) {
+      console.log(`[Cron] Found ${pendingTasks.length} pending tasks at ${now}`);
+    }
 
-      try {
-        if (task.type === 'generate') {
-          await handleServerSideGeneration(task);
-        } else if (task.type === 'publish') {
-          await handleServerSidePublication(task);
+    for (const task of pendingTasks) {
+      if (task.scheduled_at <= now) {
+        console.log(`[Cron] Processing task ${task.id}: ${task.type} (scheduled: ${task.scheduled_at}, now: ${now})`);
+        logOperation("任务开始", { 任务ID: task.id, 类型: task.type, 预定时间: task.scheduled_at, 当前时间: now });
+        db.prepare("UPDATE tasks SET status = 'running' WHERE id = ?").run(task.id);
+
+        try {
+          if (task.type === 'generate') {
+            const count = task.count || 1;
+            console.log(`[Cron] Generating ${count} chapters for novel ${task.novel_id}`);
+            for (let i = 0; i < count; i++) {
+              await handleServerSideGeneration(task);
+            }
+          } else if (task.type === 'publish') {
+            await handleServerSidePublication(task);
+          }
+          db.prepare("UPDATE tasks SET status = 'completed' WHERE id = ?").run(task.id);
+          logOperation("任务完成", { 任务ID: task.id, 类型: task.type });
+        } catch (error: any) {
+          console.error(`[Cron] Task ${task.id} failed:`, error);
+          db.prepare("UPDATE tasks SET status = 'failed', error = ? WHERE id = ?").run(error.message || String(error), task.id);
+          logOperation("任务失败", { 任务ID: task.id, 类型: task.type, 错误: error.message || String(error) });
         }
-        db.prepare("UPDATE tasks SET status = 'completed' WHERE id = ?").run(task.id);
-        logOperation("任务完成", { 任务ID: task.id, 类型: task.type });
-      } catch (error: any) {
-        console.error(`[Cron] Task ${task.id} failed:`, error);
-        db.prepare("UPDATE tasks SET status = 'failed', error = ? WHERE id = ?").run(error.message || String(error), task.id);
-        logOperation("任务失败", { 任务ID: task.id, 类型: task.type, 错误: error.message || String(error) });
+      } else {
+        // console.log(`[Cron] Task ${task.id} not yet due (scheduled: ${task.scheduled_at}, now: ${now})`);
       }
     }
   });
 
   async function handleServerSideGeneration(task: any) {
+    console.log(`[Cron] Generating chapter for novel ${task.novel_id}...`);
     const novel = db.prepare("SELECT * FROM novels WHERE id = ?").get(task.novel_id);
     if (!novel) throw new Error("Novel not found");
 
@@ -617,6 +715,7 @@ async function startServer() {
     const aiConfig = db.prepare("SELECT * FROM ai_configs WHERE is_active = 1 LIMIT 1").get();
     if (!aiConfig) throw new Error("未找到激活的 AI 配置");
 
+    console.log(`[Cron] Using AI model: ${aiConfig.model}`);
     // Get default chapter prompt
     const promptTemplate = db.prepare("SELECT content FROM prompts WHERE type = 'chapter' AND is_default = 1 LIMIT 1").get();
     const promptText = promptTemplate 
@@ -634,6 +733,7 @@ async function startServer() {
       VALUES (?, ?, ?, ?, ?, 'draft')
     `).run(task.novel_id, title, content, word_count, 0);
 
+    console.log(`[Cron] Chapter "${title}" generated successfully (ID: ${info.lastInsertRowid})`);
     logOperation("章节生成成功", { 任务ID: task.id, 小说ID: task.novel_id, 章节ID: info.lastInsertRowid });
     return info.lastInsertRowid;
   }
@@ -669,6 +769,7 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    logOperation("系统启动", { 端口: PORT, 时间: new Date().toISOString() });
   });
 }
 
