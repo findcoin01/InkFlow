@@ -736,7 +736,52 @@ async function startServer() {
       ORDER BY date DESC
       LIMIT 7
     `).all();
-    res.json({ totalTokens: totalTokens.total || 0, tokensByNovel, dailyTokens });
+
+    // Calculate token trend (last 7 days vs previous 7 days)
+    const currentWeekTokens = db.prepare(`
+      SELECT SUM(tokens) as total FROM token_logs 
+      WHERE created_at >= datetime('now', '-7 days')
+    `).get().total || 0;
+    
+    const previousWeekTokens = db.prepare(`
+      SELECT SUM(tokens) as total FROM token_logs 
+      WHERE created_at >= datetime('now', '-14 days') AND created_at < datetime('now', '-7 days')
+    `).get().total || 0;
+
+    let tokenTrend = 0;
+    if (previousWeekTokens > 0) {
+      tokenTrend = Math.round(((currentWeekTokens - previousWeekTokens) / previousWeekTokens) * 100);
+    } else if (currentWeekTokens > 0) {
+      tokenTrend = 100;
+    }
+
+    // Calculate view trend (based on chapter publishing as a proxy for view growth)
+    // In this app, views are updated when chapters are published in the cron job.
+    // We can estimate view growth by looking at how many chapters were published.
+    const currentWeekChapters = db.prepare(`
+      SELECT COUNT(*) as count FROM chapters 
+      WHERE published_at >= datetime('now', '-7 days')
+    `).get().count || 0;
+
+    const previousWeekChapters = db.prepare(`
+      SELECT COUNT(*) as count FROM chapters 
+      WHERE published_at >= datetime('now', '-14 days') AND published_at < datetime('now', '-7 days')
+    `).get().count || 0;
+
+    let viewTrend = 0;
+    if (previousWeekChapters > 0) {
+      viewTrend = Math.round(((currentWeekChapters - previousWeekChapters) / previousWeekChapters) * 100);
+    } else if (currentWeekChapters > 0) {
+      viewTrend = 100;
+    }
+
+    res.json({ 
+      totalTokens: totalTokens.total || 0, 
+      tokensByNovel, 
+      dailyTokens,
+      tokenTrend,
+      viewTrend
+    });
   });
 
   app.get("/api/stats/logs", (req, res) => {

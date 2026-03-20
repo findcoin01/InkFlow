@@ -47,6 +47,8 @@ export interface TokenStats {
   totalTokens: number;
   tokensByNovel: { title: string; tokens: number }[];
   dailyTokens: { date: string; tokens: number }[];
+  tokenTrend?: number;
+  viewTrend?: number;
 }
 
 export type AIProvider = 'gemini' | 'openai' | 'deepseek' | 'custom';

@@ -98,7 +98,7 @@ const StatCard = ({ label, value, icon: Icon, trend, t }: any) => (
       {trend !== undefined && (
         <p className={cn(
           "text-xs mt-1 flex items-center gap-1", 
-          typeof trend === 'number' ? (trend > 0 ? "text-emerald-400" : "text-rose-400") : "text-zinc-500"
+          typeof trend === 'number' ? (trend > 0 ? "text-emerald-400" : trend < 0 ? "text-rose-400" : "text-zinc-500") : "text-zinc-500"
         )}>
           {typeof trend === 'number' ? (
             <>
@@ -1975,14 +1975,14 @@ export default function App() {
                   label={t.totalTokens} 
                   value={stats?.totalTokens.toLocaleString() || "0"} 
                   icon={Sparkles} 
-                  trend={12} 
+                  trend={stats?.tokenTrend} 
                   t={t}
                 />
                 <StatCard 
                   label={t.totalViews} 
                   value={novels.reduce((acc, n) => acc + n.views, 0).toLocaleString()} 
                   icon={Eye} 
-                  trend={5} 
+                  trend={stats?.viewTrend} 
                   t={t}
                 />
                 <StatCard 
