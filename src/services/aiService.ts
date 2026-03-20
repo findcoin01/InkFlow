@@ -667,7 +667,15 @@ export async function extractNovelMetadata(
       });
 
       let text = response.text || "{}";
-      return tryExtractJson(text);
+      const usage = response.usageMetadata;
+      return {
+        data: tryExtractJson(text),
+        usage: usage ? {
+          prompt_tokens: usage.promptTokenCount,
+          completion_tokens: usage.candidatesTokenCount,
+          total_tokens: usage.totalTokenCount
+        } : undefined
+      };
     } catch (error) {
       console.error("Gemini Metadata Extraction Error:", error);
       throw error;
@@ -693,7 +701,15 @@ export async function extractNovelMetadata(
       });
 
       const text = response.choices[0].message.content || "{}";
-      return tryExtractJson(text);
+      const usage = response.usage;
+      return {
+        data: tryExtractJson(text),
+        usage: usage ? {
+          prompt_tokens: usage.prompt_tokens,
+          completion_tokens: usage.completion_tokens,
+          total_tokens: usage.total_tokens
+        } : undefined
+      };
     } catch (error) {
       console.error(`${config.provider} Metadata Extraction Error:`, error);
       throw new Error(formatAIError(error, config.provider));

@@ -665,8 +665,12 @@ export default function App() {
         lang
       );
       
-      if (result) {
-        await handleSaveNovelDetails(result);
+      if (result && result.data) {
+        await handleSaveNovelDetails({
+          ...result.data,
+          last_supplement_at: new Date().toISOString(),
+          token_usage: result.usage?.total_tokens || 0
+        });
       }
     } catch (error: any) {
       console.error("Failed to supplement novel metadata:", error);
@@ -2641,6 +2645,12 @@ export default function App() {
                       <div>
                         <h4 className="text-sm font-bold text-emerald-400 uppercase tracking-wider mb-1">{t.aiSupplement}</h4>
                         <p className="text-xs text-zinc-500">{t.aiSupplementDesc}</p>
+                        {selectedNovel.last_supplement_at && (
+                          <p className="text-[10px] text-zinc-600 mt-2 flex items-center gap-1">
+                            <Clock size={10} />
+                            {t.lastSupplementAt}: {new Date(selectedNovel.last_supplement_at).toLocaleString()}
+                          </p>
+                        )}
                       </div>
                       <button 
                         onClick={handleAISupplement}
@@ -3141,9 +3151,11 @@ export default function App() {
                                 "px-2 py-1 text-[10px] rounded-full border",
                                 log.type === 'generation'
                                   ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                  : log.type === 'supplement'
+                                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
                                   : "bg-blue-500/10 text-blue-400 border-blue-500/20"
                               )}>
-                                {log.type === 'generation' ? t.generateChapter : t.polish}
+                                {log.type === 'generation' ? t.generateChapter : log.type === 'supplement' ? t.aiSupplement : t.polish}
                               </span>
                             </td>
                           </tr>

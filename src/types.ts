@@ -15,6 +15,8 @@ export interface Novel {
   storylines?: string; // JSON string
   world_setting?: string; // JSON string
   relationships?: string; // JSON string
+  last_supplement_at?: string;
+  token_usage?: number; // For updates
 }
 
 export interface OutlineVersion {

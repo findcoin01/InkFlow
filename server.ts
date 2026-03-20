@@ -26,6 +26,7 @@ db.exec(`
     storylines TEXT,
     world_setting TEXT,
     relationships TEXT,
+    last_supplement_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -48,6 +49,12 @@ db.exec(`
 // Migration: Add summary column if it doesn't exist
 try {
   db.exec("ALTER TABLE chapters ADD COLUMN summary TEXT");
+} catch (e) {
+  // Column likely already exists
+}
+
+try {
+  db.exec("ALTER TABLE novels ADD COLUMN last_supplement_at DATETIME");
 } catch (e) {
   // Column likely already exists
 }
@@ -481,7 +488,7 @@ async function startServer() {
   
   app.patch("/api/novels/:id", (req, res) => {
     try {
-      const { title, description, target_chapters, characters, storylines, world_setting, cover_url, relationships, status } = req.body;
+      const { title, description, target_chapters, characters, storylines, world_setting, cover_url, relationships, status, last_supplement_at, token_usage } = req.body;
       
       const sanitize = (val: any) => {
         if (val === undefined) return null;
@@ -501,6 +508,7 @@ async function startServer() {
         sanitize(cover_url),
         sanitize(relationships),
         sanitize(status),
+        last_supplement_at ?? null,
         req.params.id
       ];
 
@@ -514,9 +522,14 @@ async function startServer() {
             world_setting = COALESCE(?, world_setting),
             cover_url = COALESCE(?, cover_url),
             relationships = COALESCE(?, relationships),
-            status = COALESCE(?, status)
+            status = COALESCE(?, status),
+            last_supplement_at = COALESCE(?, last_supplement_at)
         WHERE id = ?
       `).run(...params);
+
+      if (token_usage) {
+        db.prepare("INSERT INTO token_logs (novel_id, tokens, type) VALUES (?, ?, 'supplement')").run(req.params.id, token_usage);
+      }
       
       logOperation("更新小说", { ID: req.params.id, 标题: title });
       const updatedNovel = db.prepare("SELECT * FROM novels WHERE id = ?").get(req.params.id);
