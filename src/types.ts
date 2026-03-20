@@ -109,6 +109,7 @@ export interface ScheduledTask {
   chapter_id?: number;
   platform_id?: number;
   count?: number;
+  recurrence?: 'once' | 'daily';
   scheduled_at: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   error?: string;

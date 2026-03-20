@@ -73,6 +73,9 @@ export const translations = {
     generatingChapters: "Generating chapters...",
     close: "Close",
     cancel: "Cancel",
+    novelStatus: "Novel Status",
+    novelDraft: "In Progress",
+    novelCompleted: "Completed",
     tableOfContents: "Table of Contents",
     aiSettings: "AI Settings",
     aiProvider: "AI Provider",
@@ -197,6 +200,9 @@ export const translations = {
     typePolish: "Content Polishing",
     polish: "Polish",
     polishing: "Polishing...",
+    recurrence: "Recurrence",
+    recurrenceOnce: "Once",
+    recurrenceDaily: "Daily",
   },
   zh: {
     confirmReset: "确定要重置所有设置吗？这将清除您的 AI 和写作配置。",
@@ -272,6 +278,9 @@ export const translations = {
     generatingChapters: "正在批量生成章节...",
     close: "关闭",
     cancel: "取消",
+    novelStatus: "小说状态",
+    novelDraft: "连载中",
+    novelCompleted: "已完结",
     tableOfContents: "章节目录",
     aiSettings: "AI 设置",
     aiProvider: "AI 供应商",
@@ -396,6 +405,9 @@ export const translations = {
     typePolish: "内容润色",
     polish: "内容润色",
     polishing: "正在润色...",
+    recurrence: "重复周期",
+    recurrenceOnce: "仅一次",
+    recurrenceDaily: "每天",
   }
 };
 

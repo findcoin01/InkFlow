@@ -5,6 +5,8 @@ import {
   BarChart3, 
   Settings, 
   Plus, 
+  Play,
+  RefreshCw,
   Save, 
   Send, 
   Calendar, 
@@ -93,10 +95,22 @@ const StatCard = ({ label, value, icon: Icon, trend, t }: any) => (
     <div>
       <p className="text-sm text-zinc-400 mb-1">{label}</p>
       <h4 className="text-2xl font-bold text-zinc-100">{value}</h4>
-      {trend && (
-        <p className={cn("text-xs mt-1 flex items-center gap-1", trend > 0 ? "text-emerald-400" : "text-rose-400")}>
-          <TrendingUp size={12} className={trend < 0 ? "rotate-180" : ""} />
-          {Math.abs(trend)}% {t.fromLastWeek}
+      {trend !== undefined && (
+        <p className={cn(
+          "text-xs mt-1 flex items-center gap-1", 
+          typeof trend === 'number' ? (trend > 0 ? "text-emerald-400" : "text-rose-400") : "text-zinc-500"
+        )}>
+          {typeof trend === 'number' ? (
+            <>
+              <TrendingUp size={12} className={trend < 0 ? "rotate-180" : ""} />
+              {Math.abs(trend)}% {t.fromLastWeek}
+            </>
+          ) : (
+            <>
+              <Clock size={12} />
+              {trend}
+            </>
+          )}
         </p>
       )}
     </div>
@@ -312,7 +326,7 @@ export default function App() {
   const [showPreview, setShowPreview] = useState(false);
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [showTaskModal, setShowTaskModal] = useState(false);
-  const [newTask, setNewTask] = useState<Partial<ScheduledTask>>({ type: 'generate' });
+  const [newTask, setNewTask] = useState<Partial<ScheduledTask>>({ type: 'generate', count: 1, recurrence: 'once' });
 
   const [batchCount, setBatchCount] = useState(3);
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
@@ -702,6 +716,18 @@ export default function App() {
     } catch (e: any) {
       console.error(e);
       setToast({ message: e.message || "Failed to delete task", type: 'error' });
+    }
+  };
+
+  const handleRunTask = async (id: number) => {
+    try {
+      const res = await fetch(`/api/tasks/${id}/run`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to run task");
+      setToast({ message: "任务已开始执行", type: 'success' });
+      await fetchTasks();
+    } catch (e: any) {
+      console.error(e);
+      setToast({ message: e.message || "Failed to run task", type: 'error' });
     }
   };
 
@@ -1892,7 +1918,7 @@ export default function App() {
                 <p className="text-zinc-500 text-lg">{t.dashboardSub}</p>
               </header>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <StatCard 
                   label={t.totalTokens} 
                   value={stats?.totalTokens.toLocaleString() || "0"} 
@@ -1911,6 +1937,13 @@ export default function App() {
                   label={t.activeNovels} 
                   value={novels.length} 
                   icon={BookMarked} 
+                  t={t}
+                />
+                <StatCard 
+                  label={t.scheduledTasks} 
+                  value={tasks.filter(t => t.status === 'pending').length} 
+                  icon={Calendar} 
+                  trend={tasks.find(t => t.status === 'pending') ? format(new Date(tasks.find(t => t.status === 'pending')!.scheduled_at), 'HH:mm') : undefined}
                   t={t}
                 />
               </div>
@@ -2662,6 +2695,33 @@ export default function App() {
                           </p>
                         </div>
                         <div>
+                          <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">{t.novelStatus}</label>
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => handleSaveNovelDetails({ status: 'draft' })}
+                              className={cn(
+                                "flex-1 px-4 py-2 rounded-xl border text-sm font-medium transition-all",
+                                selectedNovel.status === 'draft' || !selectedNovel.status
+                                  ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400"
+                                  : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                              )}
+                            >
+                              {t.novelDraft}
+                            </button>
+                            <button 
+                              onClick={() => handleSaveNovelDetails({ status: 'completed' })}
+                              className={cn(
+                                "flex-1 px-4 py-2 rounded-xl border text-sm font-medium transition-all",
+                                selectedNovel.status === 'completed'
+                                  ? "bg-blue-500/10 border-blue-500/50 text-blue-400"
+                                  : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                              )}
+                            >
+                              {t.novelCompleted}
+                            </button>
+                          </div>
+                        </div>
+                        <div>
                           <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">{t.novelDescription}</label>
                           <textarea 
                             value={selectedNovel.description || ""}
@@ -2982,7 +3042,14 @@ export default function App() {
                           <td className="px-4 py-4 text-zinc-500">{format(new Date(novel.created_at), 'MMM dd, yyyy')}</td>
                           <td className="px-4 py-4 text-emerald-400 font-mono">{novel.total_tokens?.toLocaleString() || 0}</td>
                           <td className="px-4 py-4">
-                            <span className="px-2 py-1 bg-emerald-500/10 text-emerald-400 text-[10px] rounded-full border border-emerald-500/20">{t.active}</span>
+                            <span className={cn(
+                              "px-2 py-1 text-[10px] rounded-full border",
+                              novel.status === 'completed'
+                                ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                            )}>
+                              {novel.status === 'completed' ? t.novelCompleted : t.novelDraft}
+                            </span>
                           </td>
                         </tr>
                       ))}
@@ -3023,6 +3090,7 @@ export default function App() {
                           <th className="px-4 py-3 font-bold">{t.taskType}</th>
                           <th className="px-4 py-3 font-bold">{t.novel}</th>
                           <th className="px-4 py-3 font-bold">{t.scheduleTime}</th>
+                          <th className="px-4 py-3 font-bold">{t.recurrence}</th>
                           <th className="px-4 py-3 font-bold">{t.taskStatus}</th>
                           <th className="px-4 py-3 font-bold text-right">{t.active}</th>
                         </tr>
@@ -3030,7 +3098,7 @@ export default function App() {
                       <tbody className="divide-y divide-zinc-800">
                         {tasks.length === 0 ? (
                           <tr>
-                            <td colSpan={5} className="px-4 py-8 text-center text-zinc-500 italic">
+                            <td colSpan={6} className="px-4 py-8 text-center text-zinc-500 italic">
                               {t.noTasks}
                             </td>
                           </tr>
@@ -3039,10 +3107,17 @@ export default function App() {
                             <tr key={task.id} className="text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
                               <td className="px-4 py-4">
                                 <div className="flex items-center gap-2">
-                                  <Sparkles size={14} className="text-emerald-400" />
-                                  <span className="font-medium">
-                                    {t.generateChapter}
-                                  </span>
+                                  {task.type === 'generate' ? (
+                                    <>
+                                      <Sparkles size={14} className="text-emerald-400" />
+                                      <span className="font-medium">{t.generateChapter}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Send size={14} className="text-blue-400" />
+                                      <span className="font-medium">模拟发布</span>
+                                    </>
+                                  )}
                                 </div>
                               </td>
                               <td className="px-4 py-4">
@@ -3058,6 +3133,16 @@ export default function App() {
                               <td className="px-4 py-4">
                                 <span className={cn(
                                   "px-2 py-0.5 text-[10px] rounded-full border",
+                                  task.recurrence === 'daily' 
+                                    ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                                    : "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
+                                )}>
+                                  {task.recurrence === 'daily' ? t.recurrenceDaily : t.recurrenceOnce}
+                                </span>
+                              </td>
+                              <td className="px-4 py-4">
+                                <span className={cn(
+                                  "px-2 py-0.5 text-[10px] rounded-full border",
                                   task.status === 'pending' && "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
                                   task.status === 'running' && "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 animate-pulse",
                                   task.status === 'completed' && "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
@@ -3068,12 +3153,23 @@ export default function App() {
                                 {task.error && <p className="text-[10px] text-rose-400 mt-1 max-w-[200px] truncate" title={task.error}>{task.error}</p>}
                               </td>
                               <td className="px-4 py-4 text-right">
-                                <button 
-                                  onClick={() => handleDeleteTask(task.id)}
-                                  className="p-2 text-zinc-500 hover:text-rose-400 transition-colors"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
+                                <div className="flex items-center justify-end gap-1">
+                                  {task.status === 'pending' && (
+                                    <button 
+                                      onClick={() => handleRunTask(task.id)}
+                                      className="p-2 text-zinc-500 hover:text-emerald-400 transition-colors"
+                                      title="立即执行"
+                                    >
+                                      <Play size={16} />
+                                    </button>
+                                  )}
+                                  <button 
+                                    onClick={() => handleDeleteTask(task.id)}
+                                    className="p-2 text-zinc-500 hover:text-rose-400 transition-colors"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))
@@ -3712,15 +3808,59 @@ export default function App() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-2">{t.taskType}</label>
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-2 gap-3">
                     <button 
                       onClick={() => setNewTask({ ...newTask, type: 'generate' })}
                       className={cn(
-                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2 bg-emerald-500/10 border-emerald-500/50 text-emerald-400"
+                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
+                        newTask.type === 'generate'
+                          ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400"
+                          : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600"
                       )}
                     >
                       <Sparkles size={16} />
                       {t.generateChapter}
+                    </button>
+                    <button 
+                      onClick={() => setNewTask({ ...newTask, type: 'publish' })}
+                      className={cn(
+                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
+                        newTask.type === 'publish'
+                          ? "bg-blue-500/10 border-blue-500/50 text-blue-400"
+                          : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                      )}
+                    >
+                      <Send size={16} />
+                      模拟发布
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-2">{t.recurrence}</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button 
+                      onClick={() => setNewTask({ ...newTask, recurrence: 'once' })}
+                      className={cn(
+                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
+                        newTask.recurrence === 'once' || !newTask.recurrence
+                          ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400"
+                          : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                      )}
+                    >
+                      {t.recurrenceOnce}
+                    </button>
+                    <button 
+                      onClick={() => setNewTask({ ...newTask, recurrence: 'daily' })}
+                      className={cn(
+                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
+                        newTask.recurrence === 'daily'
+                          ? "bg-purple-500/10 border-purple-500/50 text-purple-400"
+                          : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600"
+                      )}
+                    >
+                      <RefreshCw size={16} />
+                      {t.recurrenceDaily}
                     </button>
                   </div>
                 </div>

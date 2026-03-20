@@ -117,12 +117,20 @@ db.exec(`
     scheduled_at DATETIME NOT NULL,
     status TEXT DEFAULT 'pending', -- 'pending', 'running', 'completed', 'failed'
     error TEXT,
+    recurrence TEXT DEFAULT 'once', -- 'once', 'daily'
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (novel_id) REFERENCES novels(id),
     FOREIGN KEY (chapter_id) REFERENCES chapters(id),
     FOREIGN KEY (platform_id) REFERENCES platforms(id)
   );
 `);
+
+// Migration: Add recurrence column if it doesn't exist
+try {
+  db.exec("ALTER TABLE tasks ADD COLUMN recurrence TEXT DEFAULT 'once'");
+} catch (e) {
+  // Column likely already exists
+}
 
 // Insert default platform if not exists
 const defaultPlatform = db.prepare("SELECT id FROM platforms WHERE name = 'InkFlow Public'").get();
@@ -131,6 +139,7 @@ if (!defaultPlatform) {
 }
 
 // Migration for existing databases
+try { db.prepare("ALTER TABLE novels ADD COLUMN status TEXT DEFAULT 'draft'").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE novels ADD COLUMN target_chapters INTEGER DEFAULT 50").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE novels ADD COLUMN characters TEXT").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE novels ADD COLUMN storylines TEXT").run(); } catch (e) {}
@@ -450,7 +459,7 @@ async function startServer() {
   
   app.patch("/api/novels/:id", (req, res) => {
     try {
-      const { title, description, target_chapters, characters, storylines, world_setting, cover_url, relationships } = req.body;
+      const { title, description, target_chapters, characters, storylines, world_setting, cover_url, relationships, status } = req.body;
       
       const sanitize = (val: any) => {
         if (val === undefined) return null;
@@ -469,6 +478,7 @@ async function startServer() {
         sanitize(world_setting),
         sanitize(cover_url),
         sanitize(relationships),
+        sanitize(status),
         req.params.id
       ];
 
@@ -481,7 +491,8 @@ async function startServer() {
             storylines = COALESCE(?, storylines),
             world_setting = COALESCE(?, world_setting),
             cover_url = COALESCE(?, cover_url),
-            relationships = COALESCE(?, relationships)
+            relationships = COALESCE(?, relationships),
+            status = COALESCE(?, status)
         WHERE id = ?
       `).run(...params);
       
@@ -618,12 +629,55 @@ async function startServer() {
   });
 
   app.post("/api/tasks", (req, res) => {
-    const { type, novel_id, chapter_id, platform_id, scheduled_at, count } = req.body;
+    const { type, novel_id, chapter_id, platform_id, scheduled_at, count, recurrence } = req.body;
     const info = db.prepare(`
-      INSERT INTO tasks (type, novel_id, chapter_id, platform_id, scheduled_at, count, status)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending')
-    `).run(type, novel_id, chapter_id, platform_id, scheduled_at, count || 1);
+      INSERT INTO tasks (type, novel_id, chapter_id, platform_id, scheduled_at, count, recurrence, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+    `).run(type, novel_id, chapter_id, platform_id, scheduled_at, count || 1, recurrence || 'once');
     res.json({ id: info.lastInsertRowid });
+  });
+
+  app.post("/api/tasks/:id/run", async (req, res) => {
+    const { id } = req.params;
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
+    if (!task) return res.status(404).json({ error: "Task not found" });
+
+    res.json({ message: "Task started" });
+
+    // Run in background
+    (async () => {
+      console.log(`[Manual] Running task ${task.id}: ${task.type}`);
+      logOperation("手动执行任务", { 任务ID: task.id, 类型: task.type });
+      db.prepare("UPDATE tasks SET status = 'running' WHERE id = ?").run(task.id);
+
+      try {
+        if (task.type === 'generate') {
+          const count = task.count || 1;
+          for (let i = 0; i < count; i++) {
+            await handleServerSideGeneration(task);
+          }
+        } else if (task.type === 'publish') {
+          await handleServerSidePublication(task);
+        }
+        
+        if (task.recurrence === 'daily') {
+          const nextRun = new Date(new Date(task.scheduled_at).getTime() + 24 * 60 * 60 * 1000).toISOString();
+          db.prepare("UPDATE tasks SET status = 'pending', scheduled_at = ? WHERE id = ?").run(nextRun, task.id);
+        } else {
+          db.prepare("UPDATE tasks SET status = 'completed' WHERE id = ?").run(task.id);
+        }
+        logOperation("任务完成", { 任务ID: task.id, 类型: task.type });
+      } catch (error: any) {
+        console.error(`[Manual] Task ${task.id} failed:`, error);
+        if (task.recurrence === 'daily') {
+          const nextRun = new Date(new Date(task.scheduled_at).getTime() + 24 * 60 * 60 * 1000).toISOString();
+          db.prepare("UPDATE tasks SET status = 'pending', scheduled_at = ?, error = ? WHERE id = ?").run(nextRun, error.message || String(error), task.id);
+        } else {
+          db.prepare("UPDATE tasks SET status = 'failed', error = ? WHERE id = ?").run(error.message || String(error), task.id);
+        }
+        logOperation("任务失败", { 任务ID: task.id, 类型: task.type, 错误: error.message || String(error) });
+      }
+    })();
   });
 
   app.delete("/api/tasks/:id", (req, res) => {
@@ -664,15 +718,17 @@ async function startServer() {
     }
 
     // 2. Process new Tasks table
-    // Use a more flexible date comparison or ensure frontend sends ISO strings
     const pendingTasks = db.prepare("SELECT * FROM tasks WHERE status = 'pending'").all();
     
     if (pendingTasks.length > 0) {
-      console.log(`[Cron] Found ${pendingTasks.length} pending tasks at ${now}`);
+      console.log(`[Cron] Found ${pendingTasks.length} pending tasks. Current time: ${now}`);
     }
 
     for (const task of pendingTasks) {
-      if (task.scheduled_at <= now) {
+      const taskTime = new Date(task.scheduled_at).getTime();
+      const currentTime = new Date(now).getTime();
+
+      if (taskTime <= currentTime) {
         console.log(`[Cron] Processing task ${task.id}: ${task.type} (scheduled: ${task.scheduled_at}, now: ${now})`);
         logOperation("任务开始", { 任务ID: task.id, 类型: task.type, 预定时间: task.scheduled_at, 当前时间: now });
         db.prepare("UPDATE tasks SET status = 'running' WHERE id = ?").run(task.id);
@@ -687,11 +743,24 @@ async function startServer() {
           } else if (task.type === 'publish') {
             await handleServerSidePublication(task);
           }
-          db.prepare("UPDATE tasks SET status = 'completed' WHERE id = ?").run(task.id);
+          
+          if (task.recurrence === 'daily') {
+            const nextRun = new Date(taskTime + 24 * 60 * 60 * 1000).toISOString();
+            db.prepare("UPDATE tasks SET status = 'pending', scheduled_at = ? WHERE id = ?").run(nextRun, task.id);
+            console.log(`[Cron] Task ${task.id} rescheduled for ${nextRun}`);
+          } else {
+            db.prepare("UPDATE tasks SET status = 'completed' WHERE id = ?").run(task.id);
+          }
           logOperation("任务完成", { 任务ID: task.id, 类型: task.type });
         } catch (error: any) {
           console.error(`[Cron] Task ${task.id} failed:`, error);
-          db.prepare("UPDATE tasks SET status = 'failed', error = ? WHERE id = ?").run(error.message || String(error), task.id);
+          if (task.recurrence === 'daily') {
+            const nextRun = new Date(taskTime + 24 * 60 * 60 * 1000).toISOString();
+            db.prepare("UPDATE tasks SET status = 'pending', scheduled_at = ?, error = ? WHERE id = ?").run(nextRun, error.message || String(error), task.id);
+            console.log(`[Cron] Task ${task.id} failed but rescheduled for ${nextRun}`);
+          } else {
+            db.prepare("UPDATE tasks SET status = 'failed', error = ? WHERE id = ?").run(error.message || String(error), task.id);
+          }
           logOperation("任务失败", { 任务ID: task.id, 类型: task.type, 错误: error.message || String(error) });
         }
       } else {
