@@ -571,7 +571,15 @@ export default function App() {
   const fetchAIConfigs = async () => {
     try {
       const res = await fetch("/api/ai-configs");
-      if (res.ok) setAiConfigs(await res.json());
+      if (res.ok) {
+        const configs = await res.json();
+        setAiConfigs(configs);
+        // Set active provider to the one currently in use on initial load
+        const active = configs.find((c: any) => c.is_active === 1);
+        if (active) {
+          setActiveProvider(active.provider);
+        }
+      }
     } catch (e) { console.error(e); }
   };
 
@@ -3500,26 +3508,36 @@ export default function App() {
 
               <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
                 <div className="lg:col-span-1 space-y-2">
-                  {(['gemini', 'openai', 'deepseek', 'custom'] as AIProvider[]).map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => {
-                        setActiveProvider(p);
-                        setTestResult(null);
-                      }}
-                      className={cn(
-                        "w-full py-3 px-4 rounded-xl border transition-all text-left flex items-center justify-between group",
-                        activeProvider === p 
-                          ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" 
-                          : "bg-zinc-900/50 border-zinc-800 text-zinc-500 hover:border-zinc-700"
-                      )}
-                    >
-                      <span className="font-bold">{t[p]}</span>
-                      {aiConfigs.find(c => c.provider === p)?.is_active === 1 && (
-                        <div className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                      )}
-                    </button>
-                  ))}
+                  {(['gemini', 'openai', 'deepseek', 'custom'] as AIProvider[]).map((p) => {
+                    const isActive = aiConfigs.find(c => c.provider === p)?.is_active === 1;
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => {
+                          setActiveProvider(p);
+                          setTestResult(null);
+                        }}
+                        className={cn(
+                          "w-full py-3 px-4 rounded-xl border transition-all text-left flex items-center justify-between group relative overflow-hidden",
+                          activeProvider === p 
+                            ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.1)]" 
+                            : "bg-zinc-900/50 border-zinc-800 text-zinc-500 hover:border-zinc-700"
+                        )}
+                      >
+                        <div className="flex flex-col">
+                          <span className="font-bold">{t[p]}</span>
+                          {isActive && (
+                            <span className="text-[10px] text-emerald-500/70 font-medium uppercase tracking-wider mt-0.5">
+                              {t.activeAI}
+                            </span>
+                          )}
+                        </div>
+                        {isActive && (
+                          <div className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <div className="lg:col-span-3">
