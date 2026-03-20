@@ -181,7 +181,7 @@ const StructuredContent = ({ content, placeholder }: { content: string, placehol
   }
 
   return (
-    <div className="prose prose-invert prose-sm max-w-none markdown-body">
+    <div className="markdown-body">
       <Markdown remarkPlugins={[remarkGfm]}>
         {content || `*${placeholder}*`}
       </Markdown>
@@ -2352,7 +2352,7 @@ export default function App() {
                           </div>
                         )}
                         {isMarkdownPreview ? (
-                          <div className="flex-1 p-8 overflow-y-auto markdown-body prose prose-invert prose-emerald max-w-none">
+                          <div className="flex-1 p-8 overflow-y-auto markdown-body">
                             <Markdown remarkPlugins={[remarkGfm]}>
                               {currentChapter.content || "（暂无内容）"}
                             </Markdown>
@@ -4192,10 +4192,12 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-8 md:p-12 prose prose-invert prose-emerald max-w-none scrollbar-thin scrollbar-thumb-zinc-800">
-                <Markdown remarkPlugins={[remarkGfm]}>
-                  {activeOutline.content || ""}
-                </Markdown>
+              <div className="flex-1 overflow-y-auto p-8 md:p-12 scrollbar-thin scrollbar-thumb-zinc-800">
+                <div className="markdown-body">
+                  <Markdown remarkPlugins={[remarkGfm]}>
+                    {activeOutline.content || ""}
+                  </Markdown>
+                </div>
               </div>
 
               <div className="p-6 bg-zinc-800/30 border-t border-zinc-800 flex justify-end">
