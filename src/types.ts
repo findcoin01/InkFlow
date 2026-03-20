@@ -118,3 +118,14 @@ export interface ScheduledTask {
   chapter_title?: string;
   platform_name?: string;
 }
+
+export interface TokenLog {
+  id: number;
+  novel_id: number;
+  chapter_id: number;
+  tokens: number;
+  type: string;
+  novel_title?: string;
+  chapter_title?: string;
+  created_at: string;
+}

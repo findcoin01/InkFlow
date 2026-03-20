@@ -50,7 +50,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { format } from "date-fns";
 import { cn } from "./lib/utils";
-import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout, Platform, ScheduledTask, Prompt, OperationLog, AIConfigDetail } from "./types";
+import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout, Platform, ScheduledTask, Prompt, OperationLog, AIConfigDetail, TokenLog } from "./types";
 import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, generateChapterTitleFromOutline, extractNovelMetadata, generateChapterSummary, refactorWorldSetting } from "./services/aiService";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -300,6 +300,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [novels, setNovels] = useState<Novel[]>([]);
   const [stats, setStats] = useState<TokenStats | null>(null);
+  const [tokenLogs, setTokenLogs] = useState<TokenLog[]>([]);
   const [selectedNovel, setSelectedNovel] = useState<Novel | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null);
@@ -324,6 +325,7 @@ export default function App() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [isMarkdownPreview, setIsMarkdownPreview] = useState(false);
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [newTask, setNewTask] = useState<Partial<ScheduledTask>>({ type: 'generate', count: 1, recurrence: 'once' });
@@ -431,6 +433,13 @@ export default function App() {
       if (!res.ok) throw new Error(t.fetchError || "Failed to fetch stats");
       const data = await res.json();
       setStats(data);
+      
+      // Also fetch token logs
+      const logsRes = await fetch("/api/stats/logs");
+      if (logsRes.ok) {
+        const logsData = await logsRes.json();
+        setTokenLogs(logsData);
+      }
     } catch (e: any) {
       console.error(e);
       setToast({ message: e.message || "Failed to fetch stats", type: 'error' });
@@ -1163,13 +1172,32 @@ export default function App() {
   const getChapterTitleFromOutline = (outlineContent: string, chapterNum: number) => {
     if (!outlineContent) return "";
     const lines = outlineContent.split('\n');
+    
+    // Regular chapter patterns
     const chapterPatterns = [
       new RegExp(`(?:Chapter|第)\\s*${chapterNum}(?!\\d|[-~])\\s*(?:[:：]|章|\\s|[\\)\\]）］])*\\s*(.+)`, 'i'),
       new RegExp(`^${chapterNum}(?!\\d|[-~])\\.\\s*(.+)`),
       new RegExp(`^${chapterNum}(?!\\d|[-~])[\\s：:](.+)`)
     ];
+
+    // Range patterns like 16-18
+    const rangePattern = /(?:Chapter|第)?\s*(\d+)\s*[-~]\s*(\d+)\s*(?:[:：]|章|\\s|[\\)\\]）］])*\\s*(.+)/i;
     
     for (const line of lines) {
+      // Check for range first
+      const rangeMatch = line.match(rangePattern);
+      if (rangeMatch) {
+        const start = parseInt(rangeMatch[1]);
+        const end = parseInt(rangeMatch[2]);
+        const title = rangeMatch[3].trim();
+        if (chapterNum >= start && chapterNum <= end) {
+          const index = chapterNum - start + 1;
+          const chineseNumbers = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十'];
+          const suffix = chineseNumbers[index - 1] || index;
+          return `${title} (${suffix})`;
+        }
+      }
+
       for (const pattern of chapterPatterns) {
         const match = line.match(pattern);
         if (match && match[1]) {
@@ -1838,7 +1866,11 @@ export default function App() {
                 <div className="flex-1 overflow-y-auto p-12 bg-zinc-950 scroll-smooth">
                   <div className="max-w-2xl mx-auto">
                     <h1 className="text-5xl font-bold text-white text-center mb-4">{selectedNovel.title}</h1>
-                    <p className="text-zinc-500 text-center italic mb-12">{selectedNovel.description}</p>
+                    <div className="text-zinc-500 text-center italic mb-12 markdown-body">
+                      <Markdown remarkPlugins={[remarkGfm]}>
+                        {selectedNovel.description || ""}
+                      </Markdown>
+                    </div>
                     
                     <div className="space-y-24">
                       {chapters.map((ch, idx) => (
@@ -1848,8 +1880,10 @@ export default function App() {
                             <h2 className="text-2xl font-bold text-emerald-400">第 {idx + 1} 章：{ch.title}</h2>
                             <div className="h-px flex-1 bg-zinc-800"></div>
                           </div>
-                          <div className="text-zinc-300 text-lg leading-loose whitespace-pre-wrap font-serif">
-                            {ch.content || "（暂无内容）"}
+                          <div className="text-zinc-300 text-lg leading-loose whitespace-pre-wrap font-serif markdown-body">
+                            <Markdown remarkPlugins={[remarkGfm]}>
+                              {ch.content || "（暂无内容）"}
+                            </Markdown>
                           </div>
                         </div>
                       ))}
@@ -2254,6 +2288,16 @@ export default function App() {
                             </button>
                           </div>
                           <div className="flex items-center gap-4 text-xs text-zinc-500 shrink-0">
+                            <button
+                              onClick={() => setIsMarkdownPreview(!isMarkdownPreview)}
+                              className={cn(
+                                "flex items-center gap-1 px-2 py-1 rounded-md transition-colors",
+                                isMarkdownPreview ? "bg-emerald-500/20 text-emerald-400" : "hover:bg-zinc-800"
+                              )}
+                            >
+                              {isMarkdownPreview ? <Eye size={12} /> : <FileText size={12} />}
+                              <span>{isMarkdownPreview ? t.preview : t.edit}</span>
+                            </button>
                             <span>{(currentChapter.content || "").length} {t.characters}</span>
                             <span>
                               {(() => {
@@ -2289,13 +2333,21 @@ export default function App() {
                             />
                           </div>
                         )}
-                        <textarea
-                          ref={textareaRef}
-                          value={currentChapter.content || ""}
-                          onChange={(e) => setCurrentChapter({...currentChapter, content: e.target.value})}
-                          placeholder={t.startWriting}
-                          className="flex-1 p-8 bg-transparent border-none text-zinc-300 text-lg leading-relaxed focus:outline-none resize-none"
-                        />
+                        {isMarkdownPreview ? (
+                          <div className="flex-1 p-8 overflow-y-auto markdown-body prose prose-invert prose-emerald max-w-none">
+                            <Markdown remarkPlugins={[remarkGfm]}>
+                              {currentChapter.content || "（暂无内容）"}
+                            </Markdown>
+                          </div>
+                        ) : (
+                          <textarea
+                            ref={textareaRef}
+                            value={currentChapter.content || ""}
+                            onChange={(e) => setCurrentChapter({...currentChapter, content: e.target.value})}
+                            placeholder={t.startWriting}
+                            className="flex-1 p-8 bg-transparent border-none text-zinc-300 text-lg leading-relaxed focus:outline-none resize-none"
+                          />
+                        )}
                         <div className="p-3 bg-zinc-900/90 border-t border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-md">
                           <div className="flex items-center gap-2 flex-wrap">
                             {/* AI Assist Group */}
@@ -3030,29 +3082,39 @@ export default function App() {
                     <thead>
                       <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
                         <th className="px-4 py-3 font-bold">{t.novel}</th>
+                        <th className="px-4 py-3 font-bold">章节</th>
                         <th className="px-4 py-3 font-bold">{t.date}</th>
                         <th className="px-4 py-3 font-bold">{t.tokens}</th>
-                        <th className="px-4 py-3 font-bold">{t.status}</th>
+                        <th className="px-4 py-3 font-bold">类型</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800">
-                      {novels.map(novel => (
-                        <tr key={novel.id} className="text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
-                          <td className="px-4 py-4 font-medium">{novel.title}</td>
-                          <td className="px-4 py-4 text-zinc-500">{format(new Date(novel.created_at), 'MMM dd, yyyy')}</td>
-                          <td className="px-4 py-4 text-emerald-400 font-mono">{novel.total_tokens?.toLocaleString() || 0}</td>
-                          <td className="px-4 py-4">
-                            <span className={cn(
-                              "px-2 py-1 text-[10px] rounded-full border",
-                              novel.status === 'completed'
-                                ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                            )}>
-                              {novel.status === 'completed' ? t.novelCompleted : t.novelDraft}
-                            </span>
+                      {tokenLogs.length > 0 ? (
+                        tokenLogs.map(log => (
+                          <tr key={log.id} className="text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
+                            <td className="px-4 py-4 font-medium">{log.novel_title || "Unknown"}</td>
+                            <td className="px-4 py-4 text-zinc-500">{log.chapter_title || "-"}</td>
+                            <td className="px-4 py-4 text-zinc-500">{format(new Date(log.created_at), 'yyyy-MM-dd HH:mm:ss')}</td>
+                            <td className="px-4 py-4 text-emerald-400 font-mono">{log.tokens?.toLocaleString() || 0}</td>
+                            <td className="px-4 py-4">
+                              <span className={cn(
+                                "px-2 py-1 text-[10px] rounded-full border",
+                                log.type === 'generation'
+                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                  : "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                              )}>
+                                {log.type === 'generation' ? t.generateChapter : t.polish}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-8 text-center text-zinc-600">
+                            No history logs found.
                           </td>
                         </tr>
-                      ))}
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -3422,7 +3484,16 @@ export default function App() {
                           is_active: 0
                         };
 
-                        const parsedParams = JSON.parse(config.parameters || '{}') || {};
+                        let parsedParams = {};
+                        try {
+                          const parsed = JSON.parse(config.parameters || '{}');
+                          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                            parsedParams = parsed;
+                          }
+                        } catch (e) {
+                          console.error("Failed to parse AI parameters:", e);
+                        }
+
                         const params = {
                           temperature: 0.7,
                           top_p: 0.9,
@@ -3440,10 +3511,12 @@ export default function App() {
                                   type="text"
                                   value={config.model || ""}
                                   onChange={(e) => {
-                                    const newConfigs = [...aiConfigs];
-                                    const idx = newConfigs.findIndex(c => c.provider === activeProvider);
-                                    if (idx > -1) newConfigs[idx].model = e.target.value;
-                                    else newConfigs.push({ ...config, model: e.target.value } as any);
+                                    const newConfigs = aiConfigs.map(c => 
+                                      c.provider === activeProvider ? { ...c, model: e.target.value } : c
+                                    );
+                                    if (!newConfigs.find(c => c.provider === activeProvider)) {
+                                      newConfigs.push({ ...config, model: e.target.value } as any);
+                                    }
                                     setAiConfigs(newConfigs);
                                   }}
                                   className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
@@ -3455,10 +3528,12 @@ export default function App() {
                                   type="text"
                                   value={config.base_url || ""}
                                   onChange={(e) => {
-                                    const newConfigs = [...aiConfigs];
-                                    const idx = newConfigs.findIndex(c => c.provider === activeProvider);
-                                    if (idx > -1) newConfigs[idx].base_url = e.target.value;
-                                    else newConfigs.push({ ...config, base_url: e.target.value } as any);
+                                    const newConfigs = aiConfigs.map(c => 
+                                      c.provider === activeProvider ? { ...c, base_url: e.target.value } : c
+                                    );
+                                    if (!newConfigs.find(c => c.provider === activeProvider)) {
+                                      newConfigs.push({ ...config, base_url: e.target.value } as any);
+                                    }
                                     setAiConfigs(newConfigs);
                                   }}
                                   className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
@@ -3472,10 +3547,12 @@ export default function App() {
                                 type="password"
                                 value={config.api_key || ""}
                                 onChange={(e) => {
-                                  const newConfigs = [...aiConfigs];
-                                  const idx = newConfigs.findIndex(c => c.provider === activeProvider);
-                                  if (idx > -1) newConfigs[idx].api_key = e.target.value;
-                                  else newConfigs.push({ ...config, api_key: e.target.value } as any);
+                                  const newConfigs = aiConfigs.map(c => 
+                                    c.provider === activeProvider ? { ...c, api_key: e.target.value } : c
+                                  );
+                                  if (!newConfigs.find(c => c.provider === activeProvider)) {
+                                    newConfigs.push({ ...config, api_key: e.target.value } as any);
+                                  }
                                   setAiConfigs(newConfigs);
                                 }}
                                 className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all font-mono"
@@ -3498,10 +3575,12 @@ export default function App() {
                                     value={params.temperature || 0.7}
                                     onChange={(e) => {
                                       const newParams = { ...params, temperature: parseFloat(e.target.value) };
-                                      const newConfigs = [...aiConfigs];
-                                      const idx = newConfigs.findIndex(c => c.provider === activeProvider);
-                                      if (idx > -1) newConfigs[idx].parameters = JSON.stringify(newParams);
-                                      else newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      const newConfigs = aiConfigs.map(c => 
+                                        c.provider === activeProvider ? { ...c, parameters: JSON.stringify(newParams) } : c
+                                      );
+                                      if (!newConfigs.find(c => c.provider === activeProvider)) {
+                                        newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      }
                                       setAiConfigs(newConfigs);
                                     }}
                                     className="w-full accent-emerald-500"
@@ -3517,10 +3596,12 @@ export default function App() {
                                     value={params.top_p || 0.9}
                                     onChange={(e) => {
                                       const newParams = { ...params, top_p: parseFloat(e.target.value) };
-                                      const newConfigs = [...aiConfigs];
-                                      const idx = newConfigs.findIndex(c => c.provider === activeProvider);
-                                      if (idx > -1) newConfigs[idx].parameters = JSON.stringify(newParams);
-                                      else newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      const newConfigs = aiConfigs.map(c => 
+                                        c.provider === activeProvider ? { ...c, parameters: JSON.stringify(newParams) } : c
+                                      );
+                                      if (!newConfigs.find(c => c.provider === activeProvider)) {
+                                        newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      }
                                       setAiConfigs(newConfigs);
                                     }}
                                     className="w-full accent-emerald-500"
@@ -3536,10 +3617,12 @@ export default function App() {
                                     value={params.max_tokens || 4096}
                                     onChange={(e) => {
                                       const newParams = { ...params, max_tokens: parseInt(e.target.value) };
-                                      const newConfigs = [...aiConfigs];
-                                      const idx = newConfigs.findIndex(c => c.provider === activeProvider);
-                                      if (idx > -1) newConfigs[idx].parameters = JSON.stringify(newParams);
-                                      else newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      const newConfigs = aiConfigs.map(c => 
+                                        c.provider === activeProvider ? { ...c, parameters: JSON.stringify(newParams) } : c
+                                      );
+                                      if (!newConfigs.find(c => c.provider === activeProvider)) {
+                                        newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      }
                                       setAiConfigs(newConfigs);
                                     }}
                                     className="w-full accent-emerald-500"
@@ -3555,10 +3638,12 @@ export default function App() {
                                     value={params.top_k || 40}
                                     onChange={(e) => {
                                       const newParams = { ...params, top_k: parseInt(e.target.value) };
-                                      const newConfigs = [...aiConfigs];
-                                      const idx = newConfigs.findIndex(c => c.provider === activeProvider);
-                                      if (idx > -1) newConfigs[idx].parameters = JSON.stringify(newParams);
-                                      else newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      const newConfigs = aiConfigs.map(c => 
+                                        c.provider === activeProvider ? { ...c, parameters: JSON.stringify(newParams) } : c
+                                      );
+                                      if (!newConfigs.find(c => c.provider === activeProvider)) {
+                                        newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
+                                      }
                                       setAiConfigs(newConfigs);
                                     }}
                                     className="w-full accent-emerald-500"

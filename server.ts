@@ -164,7 +164,19 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({ limit: '500mb' }));
+  app.use(express.urlencoded({ limit: '500mb', extended: true }));
+
+  // Debug middleware to log request size
+  app.use((req, res, next) => {
+    if (req.method === 'POST' || req.method === 'PATCH' || req.method === 'PUT') {
+      const size = parseInt(req.headers['content-length'] || '0');
+      if (size > 1024 * 1024) { // Log if > 1MB
+        console.log(`[Request Size] ${req.method} ${req.url}: ${(size / 1024 / 1024).toFixed(2)} MB`);
+      }
+    }
+    next();
+  });
 
   // Helper for logging operations
   function logOperation(action: string, details: any) {
@@ -386,6 +398,16 @@ async function startServer() {
     if (is_active) {
       db.prepare("UPDATE ai_configs SET is_active = 0").run();
     }
+    
+    const sanitizeParams = (params: any) => {
+      if (typeof params === 'string') return params;
+      try {
+        return JSON.stringify(params);
+      } catch (e) {
+        return '{}';
+      }
+    };
+
     db.prepare(`
       INSERT INTO ai_configs (provider, model, api_key, base_url, parameters, is_active)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -395,7 +417,7 @@ async function startServer() {
         base_url = excluded.base_url,
         parameters = excluded.parameters,
         is_active = excluded.is_active
-    `).run(provider, model, api_key, base_url, JSON.stringify(parameters), is_active ? 1 : 0);
+    `).run(provider, model, api_key, base_url, sanitizeParams(parameters), is_active ? 1 : 0);
     logOperation("更新AI配置", { 供应商: provider });
     res.json({ success: true });
   });
@@ -702,6 +724,18 @@ async function startServer() {
       LIMIT 7
     `).all();
     res.json({ totalTokens: totalTokens.total || 0, tokensByNovel, dailyTokens });
+  });
+
+  app.get("/api/stats/logs", (req, res) => {
+    const logs = db.prepare(`
+      SELECT tl.*, n.title as novel_title, c.title as chapter_title
+      FROM token_logs tl
+      LEFT JOIN novels n ON tl.novel_id = n.id
+      LEFT JOIN chapters c ON tl.chapter_id = c.id
+      ORDER BY tl.created_at DESC
+      LIMIT 50
+    `).all();
+    res.json(logs);
   });
 
   // Scheduled Tasks Processor
