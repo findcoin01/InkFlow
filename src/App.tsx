@@ -48,8 +48,7 @@ import {
   Pie
 } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
-import { format } from "date-fns";
-import { cn } from "./lib/utils";
+import { cn, formatDate } from "./lib/utils";
 import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout, Platform, ScheduledTask, Prompt, OperationLog, AIConfigDetail, TokenLog } from "./types";
 import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, generateChapterTitleFromOutline, extractNovelMetadata, generateChapterSummary, refactorWorldSetting } from "./services/aiService";
 import Markdown from "react-markdown";
@@ -1246,7 +1245,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          version_name: `AI 生成 ${format(new Date(), "HH:mm")}`,
+          version_name: `AI 生成 ${formatDate(new Date(), "HH:mm")}`,
           content: result.text
         }),
       });
@@ -2003,7 +2002,7 @@ export default function App() {
                   label={t.scheduledTasks} 
                   value={tasks.filter(t => t.status === 'pending').length} 
                   icon={Calendar} 
-                  trend={tasks.find(t => t.status === 'pending') ? format(new Date(tasks.find(t => t.status === 'pending')!.scheduled_at), 'HH:mm') : undefined}
+                  trend={tasks.find(t => t.status === 'pending') ? formatDate(tasks.find(t => t.status === 'pending')!.scheduled_at, 'HH:mm') : undefined}
                   t={t}
                 />
               </div>
@@ -2012,7 +2011,7 @@ export default function App() {
                 <Card title={t.tokenConsumption}>
                   <div className="h-64 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={stats?.dailyTokens.map(d => ({ ...d, date: format(new Date(d.date), 'MMM dd') })) || []}>
+                      <LineChart data={stats?.dailyTokens.map(d => ({ ...d, date: formatDate(d.date, 'MMM dd') })) || []}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
                         <XAxis dataKey="date" stroke="#71717a" fontSize={12} />
                         <YAxis stroke="#71717a" fontSize={12} />
@@ -2481,7 +2480,7 @@ export default function App() {
                                   {t.autoSaved}
                                   {lastSavedAt && (
                                     <span className="ml-1 opacity-60">
-                                      {format(lastSavedAt, "HH:mm")}
+                                      {formatDate(lastSavedAt, "HH:mm")}
                                     </span>
                                   )}
                                 </>
@@ -3152,7 +3151,7 @@ export default function App() {
                           <tr key={log.id} className="text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
                             <td className="px-4 py-4 font-medium">{log.novel_title || "Unknown"}</td>
                             <td className="px-4 py-4 text-zinc-500">{log.chapter_title || "-"}</td>
-                            <td className="px-4 py-4 text-zinc-500">{format(new Date(log.created_at), 'yyyy-MM-dd HH:mm:ss')}</td>
+                            <td className="px-4 py-4 text-zinc-500">{formatDate(log.created_at, 'yyyy-MM-dd HH:mm:ss')}</td>
                             <td className="px-4 py-4 text-emerald-400 font-mono">{log.tokens?.toLocaleString() || 0}</td>
                             <td className="px-4 py-4">
                               <span className={cn(
@@ -3249,7 +3248,7 @@ export default function App() {
                               <td className="px-4 py-4 text-zinc-400">
                                 <div className="flex items-center gap-1.5">
                                   <Clock size={12} />
-                                  {format(new Date(task.scheduled_at), 'yyyy-MM-dd HH:mm')}
+                                  {formatDate(task.scheduled_at, 'yyyy-MM-dd HH:mm')}
                                 </div>
                               </td>
                               <td className="px-4 py-4">
@@ -3456,7 +3455,7 @@ export default function App() {
                             <p className="text-xs text-zinc-500 max-w-md truncate">{log.details}</p>
                           </td>
                           <td className="px-4 py-4 text-zinc-400 text-xs">
-                            {format(new Date(log.created_at), 'yyyy-MM-dd HH:mm:ss')}
+                            {formatDate(log.created_at, 'yyyy-MM-dd HH:mm:ss')}
                           </td>
                         </tr>
                       ))}
