@@ -301,6 +301,9 @@ export default function App() {
   const [novels, setNovels] = useState<Novel[]>([]);
   const [stats, setStats] = useState<TokenStats | null>(null);
   const [tokenLogs, setTokenLogs] = useState<TokenLog[]>([]);
+  const [tokenLogPage, setTokenLogPage] = useState(1);
+  const [tokenLogTotalPages, setTokenLogTotalPages] = useState(1);
+  const [tokenLogTotal, setTokenLogTotal] = useState(0);
   const [selectedNovel, setSelectedNovel] = useState<Novel | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null);
@@ -435,14 +438,25 @@ export default function App() {
       setStats(data);
       
       // Also fetch token logs
-      const logsRes = await fetch("/api/stats/logs");
-      if (logsRes.ok) {
-        const logsData = await logsRes.json();
-        setTokenLogs(logsData);
-      }
+      await fetchTokenLogs(1);
     } catch (e: any) {
       console.error(e);
       setToast({ message: e.message || "Failed to fetch stats", type: 'error' });
+    }
+  };
+
+  const fetchTokenLogs = async (page = 1) => {
+    try {
+      const res = await fetch(`/api/stats/logs?page=${page}&limit=20`);
+      if (res.ok) {
+        const data = await res.json();
+        setTokenLogs(data.logs);
+        setTokenLogPage(data.page);
+        setTokenLogTotalPages(data.totalPages);
+        setTokenLogTotal(data.total);
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -3076,7 +3090,33 @@ export default function App() {
                 </Card>
               </div>
 
-              <Card title={t.tokenHistoryLog}>
+              <Card 
+                title={t.tokenHistoryLog}
+                headerAction={
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-500">{t.total}: {tokenLogTotal}</span>
+                    <div className="flex items-center gap-1 ml-4">
+                      <button 
+                        onClick={() => fetchTokenLogs(tokenLogPage - 1)}
+                        disabled={tokenLogPage <= 1}
+                        className="p-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-all"
+                      >
+                        <ChevronRight size={14} className="rotate-180" />
+                      </button>
+                      <span className="text-xs text-zinc-400 px-2">
+                        {tokenLogPage} / {tokenLogTotalPages}
+                      </span>
+                      <button 
+                        onClick={() => fetchTokenLogs(tokenLogPage + 1)}
+                        disabled={tokenLogPage >= tokenLogTotalPages}
+                        className="p-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-all"
+                      >
+                        <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                }
+              >
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
                     <thead>

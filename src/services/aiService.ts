@@ -517,6 +517,67 @@ export async function generateChapterSummary(content: string, config: AIConfig, 
   }
 }
 
+function tryExtractJson(text: string): any {
+  try {
+    return JSON.parse(text);
+  } catch (e: any) {
+    // Try to find a JSON block in the text
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      let fixedJson = jsonMatch[0];
+      try {
+        return JSON.parse(fixedJson);
+      } catch (e2: any) {
+        // If it's still failing, it might be truncated.
+        // Try to close open strings, arrays, and objects
+        let openQuotes = false;
+        for (let i = 0; i < fixedJson.length; i++) {
+          if (fixedJson[i] === '"' && fixedJson[i - 1] !== '\\') {
+            openQuotes = !openQuotes;
+          }
+        }
+
+        if (openQuotes) {
+          fixedJson += '"';
+        }
+
+        // Count open braces and brackets
+        let braces = 0;
+        let brackets = 0;
+        let inString = false;
+        for (let i = 0; i < fixedJson.length; i++) {
+          if (fixedJson[i] === '"' && fixedJson[i - 1] !== '\\') {
+            inString = !inString;
+          }
+          if (!inString) {
+            if (fixedJson[i] === '{') braces++;
+            if (fixedJson[i] === '}') braces--;
+            if (fixedJson[i] === '[') brackets++;
+            if (fixedJson[i] === ']') brackets--;
+          }
+        }
+
+        while (brackets > 0) {
+          fixedJson += ']';
+          brackets--;
+        }
+        while (braces > 0) {
+          fixedJson += '}';
+          braces--;
+        }
+
+        try {
+          return JSON.parse(fixedJson);
+        } catch (e3) {
+          console.error("Failed to fix truncated JSON:", e3);
+          throw e2; // Throw the original parse error if fix fails
+        }
+      }
+    }
+    throw e;
+  }
+}
+
 export async function extractNovelMetadata(
   chapters: Chapter[], 
   currentMetadata: { characters: string, storylines: string, world_setting: string, relationships: string },
@@ -543,22 +604,27 @@ export async function extractNovelMetadata(
     );
   }
 
+  const limitText = (text: string, max: number) => {
+    if (text.length <= max) return text;
+    return text.slice(0, max) + "... (内容已截断以节省空间)";
+  };
+
   const chaptersContent = selectedChapters.map(c => {
-    const content = c.summary || c.content.slice(0, 600);
+    const content = c.summary || c.content.slice(0, 500);
     return `章节 ${c.title} (索引: ${chapters.indexOf(c) + 1}, ${c.summary ? '摘要' : '摘录'}):\n${content}`;
   }).join("\n\n");
   
   const fullPrompt = `你是一位创意编辑。根据提供的章节摘要或摘录，提取并更新小说的元数据。
   ${langInstruction}
   
-  当前元数据：
-  角色：${currentMetadata.characters}
-  剧情线：${currentMetadata.storylines}
-  世界设定：${currentMetadata.world_setting}
-  人际关系：${currentMetadata.relationships}
+  当前元数据（请在此基础上进行增量更新，保持简洁）：
+  角色：${limitText(currentMetadata.characters, 2000)}
+  剧情线：${limitText(currentMetadata.storylines, 2000)}
+  世界设定：${limitText(currentMetadata.world_setting, 2000)}
+  人际关系：${limitText(currentMetadata.relationships, 2000)}
   
   近期章节信息：
-  ${chaptersContent}
+  ${limitText(chaptersContent, 8000)}
   
   任务：分析章节并更新元数据。
   - 角色：列出主要角色、他们的特征和当前状态。
@@ -566,9 +632,14 @@ export async function extractNovelMetadata(
   - 世界设定：更新引入的地理、魔法系统或社会规则。
   - 人际关系：描述角色之间的联系（例如，“A 是 B 的导师”，“C 和 D 是竞争对手”）。
   
-  以 JSON 格式返回响应。`;
+  重要规则：
+  1. 保持响应简洁，避免冗长描述。
+  2. 仅输出更新后的元数据。
+  3. 必须以有效的 JSON 格式返回响应。`;
 
   const params = getParams(config);
+  // Increase max_tokens for metadata extraction as it can be quite large
+  const metadataMaxTokens = Math.max(params.max_tokens, 8192);
 
   if (config.provider === 'gemini' && !config.baseUrl) {
     const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
@@ -580,7 +651,7 @@ export async function extractNovelMetadata(
           temperature: params.temperature,
           topP: params.top_p,
           topK: params.top_k,
-          maxOutputTokens: params.max_tokens,
+          maxOutputTokens: metadataMaxTokens,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -596,7 +667,7 @@ export async function extractNovelMetadata(
       });
 
       let text = response.text || "{}";
-      return JSON.parse(text);
+      return tryExtractJson(text);
     } catch (error) {
       console.error("Gemini Metadata Extraction Error:", error);
       throw error;
@@ -618,11 +689,11 @@ export async function extractNovelMetadata(
         response_format: { type: "json_object" },
         temperature: params.temperature,
         top_p: params.top_p,
-        max_tokens: params.max_tokens,
+        max_tokens: metadataMaxTokens,
       });
 
       const text = response.choices[0].message.content || "{}";
-      return JSON.parse(text);
+      return tryExtractJson(text);
     } catch (error) {
       console.error(`${config.provider} Metadata Extraction Error:`, error);
       throw new Error(formatAIError(error, config.provider));

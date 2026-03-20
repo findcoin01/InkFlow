@@ -727,15 +727,28 @@ async function startServer() {
   });
 
   app.get("/api/stats/logs", (req, res) => {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const offset = (page - 1) * limit;
+
+    const total = db.prepare("SELECT COUNT(*) as count FROM token_logs").get().count;
+    const totalPages = Math.ceil(total / limit);
+
     const logs = db.prepare(`
       SELECT tl.*, n.title as novel_title, c.title as chapter_title
       FROM token_logs tl
       LEFT JOIN novels n ON tl.novel_id = n.id
       LEFT JOIN chapters c ON tl.chapter_id = c.id
       ORDER BY tl.created_at DESC
-      LIMIT 50
-    `).all();
-    res.json(logs);
+      LIMIT ? OFFSET ?
+    `).all(limit, offset);
+    
+    res.json({
+      logs,
+      total,
+      page,
+      totalPages
+    });
   });
 
   // Scheduled Tasks Processor
