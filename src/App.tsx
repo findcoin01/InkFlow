@@ -247,7 +247,7 @@ const TemplateSelector = ({
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium">{p.name}</span>
                     {p.is_default === 1 && (
-                      <span className="text-[8px] px-1 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 uppercase">Default</span>
+                      <span className="text-[8px] px-1 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 uppercase">{t.defaultLabel || "Default"}</span>
                     )}
                   </div>
                   <span className="text-[9px] text-zinc-600 truncate opacity-0 group-hover/item:opacity-100 transition-opacity">
@@ -269,7 +269,7 @@ const TemplateSelector = ({
             ))
           ) : (
             <div className="px-4 py-8 text-center">
-              <p className="text-[10px] text-zinc-600 uppercase tracking-widest">No templates found</p>
+              <p className="text-[10px] text-zinc-600 uppercase tracking-widest">{t.noTemplates || "No templates found"}</p>
             </div>
           )}
         </div>
@@ -500,11 +500,11 @@ export default function App() {
         await fetchPrompts();
         setShowPromptModal(false);
         setEditingPrompt(null);
-        setToast({ message: isNew ? "提示词已创建" : "提示词已更新", type: 'success' });
+        setToast({ message: isNew ? t.promptCreated : t.promptUpdated, type: 'success' });
       }
     } catch (e) {
       console.error(e);
-      setToast({ message: "保存提示词失败", type: 'error' });
+      setToast({ message: t.promptSaveError, type: 'error' });
     }
   };
 
@@ -518,7 +518,7 @@ export default function App() {
       
       if (res.ok) {
         await fetchPrompts();
-        setToast({ message: "已设为默认提示词", type: 'success' });
+        setToast({ message: t.promptSetDefault, type: 'success' });
       }
     } catch (e) {
       console.error(e);
@@ -766,7 +766,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/tasks/${id}/run`, { method: "POST" });
       if (!res.ok) throw new Error("Failed to run task");
-      setToast({ message: "任务已开始执行", type: 'success' });
+      setToast({ message: t.taskStarted, type: 'success' });
       await fetchTasks();
     } catch (e: any) {
       console.error(e);
@@ -787,11 +787,11 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title, token_usage: tokens }),
         });
-        setToast({ message: t.generateTitle + " " + t.active, type: 'success' });
+        setToast({ message: t.saveSuccess, type: 'success' });
       }
     } catch (e) {
       console.error(e);
-      setToast({ message: "Failed to generate title", type: 'error' });
+      setToast({ message: t.aiError, type: 'error' });
     } finally {
       setIsGeneratingTitle(false);
     }
@@ -1024,7 +1024,7 @@ export default function App() {
         if (!res.ok) throw new Error(t.saveError || "Failed to save summary");
         setToast({ message: t.summarize + " " + t.active, type: 'success' });
       } else {
-        setToast({ message: "AI returned an empty summary. Please try again.", type: 'error' });
+        setToast({ message: t.emptySummaryError || "AI returned an empty summary. Please try again.", type: 'error' });
       }
     } catch (error: any) {
       console.error("Error generating summary:", error);
@@ -1043,8 +1043,8 @@ export default function App() {
       const activeOutlineContent = selectedNovel.outlines?.find(o => o.is_active === 1)?.content || "";
       const currentContent = currentChapter.content;
       
-      const prompt = `请对以下小说章节内容进行重构和润色：\n\n${currentContent}`;
-      const context = `小说标题: ${selectedNovel.title}\n大纲: ${activeOutlineContent}`;
+      const prompt = `${t.refactorPrompt}\n\n${currentContent}`;
+      const context = `${t.novelTitleContext}: ${selectedNovel.title}\n${t.outlineContextLabel}: ${activeOutlineContent}`;
       
       let streamedText = "";
       const promptTemplate = getActivePrompt('polish');
@@ -1091,9 +1091,9 @@ export default function App() {
       const currentContent = currentChapter.content || "";
       
       // Stronger context for layout
-      const layoutContext = `重要：请严格遵守 ${writingConfig.layout} 排版风格。`;
-      const prompt = `${layoutContext}\n\n继续创作章节《${currentChapter.title}》。当前内容为：${currentContent.slice(-800)}`;
-      const context = `小说标题: ${selectedNovel.title}\n大纲: ${activeOutlineContent}`;
+      const layoutContext = `${t.layoutStrictContext.replace('{layout}', writingConfig.layout)}`;
+      const prompt = `${layoutContext}\n\n${t.continueWritingPrompt.replace('{title}', currentChapter.title)}${currentContent.slice(-800)}`;
+      const context = `${t.novelTitleContext}: ${selectedNovel.title}\n${t.outlineContextLabel}: ${activeOutlineContent}`;
       
       let streamedText = "";
       const promptTemplate = getActivePrompt('chapter');
@@ -1155,12 +1155,12 @@ export default function App() {
         if (controller.signal.aborted) break;
         setSegmentProgress(Math.round(((i) / segments) * 100));
         
-        const layoutContext = `严格排版：使用 ${writingConfig.layout} 风格。对于网络小说，这意味着每段最多 2 句话。`;
-        const prompt = `${layoutContext}\n\n这是章节《${currentChapter.title}》的第 ${i + 1} 段（共 ${segments} 段）。
-        ${i > 0 ? "从上文结束的地方继续创作。不要重复之前的句子。立即开始接下来的行动或对话。" : "从头开始创作本章。"} 
+        const layoutContext = `${t.segmentedWritePrompt.replace('{layout}', writingConfig.layout)}`;
+        const prompt = `${layoutContext}\n\n${t.segmentedPartPrompt.replace('{title}', currentChapter.title).replace('{current}', (i + 1).toString()).replace('{total}', segments.toString())}
+        ${i > 0 ? t.segmentedContinuePrompt : t.segmentedStartPrompt} 
         
-        上文背景：${currentContent.slice(-1000)}`;
-        const context = `小说标题: ${selectedNovel.title}\n大纲: ${activeOutlineContent}`;
+        ${t.contextBackground}：${currentContent.slice(-1000)}`;
+        const context = `${t.novelTitleContext}: ${selectedNovel.title}\n${t.outlineContextLabel}: ${activeOutlineContent}`;
         
         let streamedText = "";
         const promptTemplate = getActivePrompt('chapter');
@@ -1264,7 +1264,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          version_name: `AI 生成 ${formatDate(new Date(), "HH:mm")}`,
+          version_name: `${t.aiGenerated || "AI Generated"} ${formatDate(new Date(), "HH:mm")}`,
           content: result.text,
           token_usage: result.tokens
         }),
@@ -1292,7 +1292,7 @@ export default function App() {
       let outlineTitle = getChapterTitleFromOutline(activeOutlineContent, nextChapterNum);
       
       if (!outlineTitle && activeOutlineContent) {
-        setToast({ message: "Generating chapter title from outline...", type: 'success' });
+        setToast({ message: t.generatingTitle || "Generating chapter title from outline...", type: 'success' });
         const titleRes = await generateChapterTitleFromOutline(activeOutlineContent, nextChapterNum, aiConfig, lang);
         outlineTitle = titleRes.text;
         // Log tokens for title generation
@@ -1300,7 +1300,7 @@ export default function App() {
           await fetch("/api/token-logs", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ novel_id: selectedNovel.id, operation_type: "生成标题", tokens: Math.round(titleRes.tokens) }),
+            body: JSON.stringify({ novel_id: selectedNovel.id, operation_type: t.generateTitleLabel || "生成标题", tokens: Math.round(titleRes.tokens) }),
           }).catch(console.error);
         }
       }
@@ -1356,7 +1356,7 @@ export default function App() {
     const actualBatchCount = Math.min(batchCount, remainingChapters);
     
     if (actualBatchCount <= 0) {
-      setToast({ message: "Already reached target chapter count", type: 'success' });
+      setToast({ message: t.targetReached, type: 'success' });
       setShowBatchModal(false);
       return;
     }
@@ -1412,10 +1412,10 @@ export default function App() {
         // 2. Generate content with streaming
         const isLastChapter = nextChapterNum >= targetChapters;
         const prompt = isLastChapter 
-          ? `创作小说的最终章（${defaultTitle}）。为故事带来圆满的结局，并解决所有主要情节。`
-          : `创作第 ${nextChapterNum} 章（${defaultTitle}）。重点是根据大纲推进情节。当前进度：${nextChapterNum}/${targetChapters} 章。`;
+          ? t.finalChapterPrompt.replace('{title}', defaultTitle)
+          : t.nextChapterPrompt.replace('{num}', nextChapterNum.toString()).replace('{title}', defaultTitle).replace('{total}', targetChapters.toString());
         
-        const context = `小说标题: ${selectedNovel.title}\n描述: ${selectedNovel.description}\n目标总章节: ${targetChapters}\n大纲: ${activeOutlineContent}\n角色: ${selectedNovel.characters || "未定义"}\n世界设定: ${selectedNovel.world_setting || "未定义"}\n前文背景: ${currentChapters.slice(-2).map((c: any) => c.title + ": " + (c.content || "").slice(-500)).join("\n")}`;
+        const context = `${t.novelTitleContext}: ${selectedNovel.title}\n${t.descriptionContextLabel}: ${selectedNovel.description}\n${t.targetChaptersContextLabel}: ${targetChapters}\n${t.outlineContextLabel}: ${activeOutlineContent}\n${t.charactersContextLabel}: ${selectedNovel.characters || t.undefinedContext}\n${t.worldSettingContextLabel}: ${selectedNovel.world_setting || t.undefinedContext}\n${t.contextBackground}: ${currentChapters.slice(-2).map((c: any) => c.title + ": " + (c.content || "").slice(-500)).join("\n")}`;
         
         let fullContent = "";
         
@@ -1627,11 +1627,11 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-2">类型/风格 (Genre/Style)</label>
+                  <label className="block text-sm font-medium text-zinc-400 mb-2">{t.novelGenreLabel}</label>
                   <input 
                     value={newNovelGenre || ""}
                     onChange={(e) => setNewNovelGenre(e.target.value)}
-                    placeholder="例如：玄幻、都市、科幻..."
+                    placeholder={t.novelGenrePlaceholder}
                     className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
                   />
                 </div>
@@ -1640,7 +1640,7 @@ export default function App() {
                     onClick={() => setShowCreateModal(false)}
                     className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
                   >
-                    取消
+                    {t.cancel}
                   </button>
                   <button 
                     onClick={handleCreateNovel}
@@ -1649,7 +1649,7 @@ export default function App() {
                   >
                     {isCreating ? (
                       <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-                    ) : t.save}
+                    ) : t.confirm}
                   </button>
                 </div>
               </div>
@@ -1678,13 +1678,13 @@ export default function App() {
                   onClick={() => setNovelToDelete(null)}
                   className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
                 >
-                  取消
+                  {t.cancel}
                 </button>
                 <button 
                   onClick={confirmDeleteNovel}
                   className="flex-1 py-3 bg-rose-500 hover:bg-rose-400 text-white font-bold rounded-xl transition-all"
                 >
-                  确认删除
+                  {t.delete}
                 </button>
               </div>
             </motion.div>
@@ -1709,13 +1709,13 @@ export default function App() {
                   onClick={() => setChapterToDelete(null)}
                   className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
                 >
-                  取消
+                  {t.cancel}
                 </button>
                 <button 
                   onClick={confirmDeleteChapter}
                   className="flex-1 py-3 bg-rose-500 hover:bg-rose-400 text-white font-bold rounded-xl transition-all"
                 >
-                  确认删除
+                  {t.delete}
                 </button>
               </div>
             </motion.div>
@@ -1740,13 +1740,13 @@ export default function App() {
                   onClick={() => setOutlineToDelete(null)}
                   className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
                 >
-                  取消
+                  {t.cancel}
                 </button>
                 <button 
                   onClick={confirmDeleteOutline}
                   className="flex-1 py-3 bg-rose-500 hover:bg-rose-400 text-white font-bold rounded-xl transition-all"
                 >
-                  确认删除
+                  {t.delete}
                 </button>
               </div>
             </motion.div>
@@ -1771,13 +1771,13 @@ export default function App() {
                   onClick={() => setShowResetConfirm(false)}
                   className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
                 >
-                  取消
+                  {t.cancel}
                 </button>
                 <button 
                   onClick={confirmResetSettings}
                   className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-white font-bold rounded-xl transition-all"
                 >
-                  确认重置
+                  {t.confirm}
                 </button>
               </div>
             </motion.div>
@@ -1802,13 +1802,13 @@ export default function App() {
                   onClick={() => setPromptToDelete(null)}
                   className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
                 >
-                  取消
+                  {t.cancel}
                 </button>
                 <button 
                   onClick={confirmDeletePrompt}
                   className="flex-1 py-3 bg-rose-500 hover:bg-rose-400 text-white font-bold rounded-xl transition-all"
                 >
-                  确认删除
+                  {t.delete}
                 </button>
               </div>
             </motion.div>
@@ -1834,7 +1834,7 @@ export default function App() {
                 <label className="block text-sm text-zinc-500 mb-2">
                   {t.generateCount} 
                   <span className="ml-2 text-[10px] text-zinc-600 uppercase font-bold">
-                    (Max: {Math.max(0, (selectedNovel.target_chapters || 50) - chapters.length)})
+                    ({t.maxLabel || "Max"}: {Math.max(0, (selectedNovel.target_chapters || 50) - chapters.length)})
                   </span>
                 </label>
                 <div className="flex gap-4 mb-4">
@@ -1862,7 +1862,7 @@ export default function App() {
                     }}
                     min={1}
                     className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                    placeholder="Custom count..."
+                    placeholder={t.customCountPlaceholder || "Custom count..."}
                   />
                 </div>
               </div>
@@ -1871,13 +1871,13 @@ export default function App() {
                   onClick={() => setShowBatchModal(false)}
                   className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
                 >
-                  取消
+                  {t.cancel}
                 </button>
                 <button 
                   onClick={handleBatchGenerate}
                   className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all"
                 >
-                  开始生成
+                  {t.startGenerating}
                 </button>
               </div>
             </motion.div>
@@ -1941,12 +1941,12 @@ export default function App() {
                         <div key={ch.id} id={`preview-chapter-${ch.id}`} className="space-y-8 scroll-mt-24">
                           <div className="flex items-center gap-4">
                             <div className="h-px flex-1 bg-zinc-800"></div>
-                            <h2 className="text-2xl font-bold text-emerald-400">第 {idx + 1} 章：{ch.title}</h2>
+                            <h2 className="text-2xl font-bold text-emerald-400">{t.chapterPrefix || "Chapter"} {idx + 1}{t.chapterSuffix || ""}：{ch.title}</h2>
                             <div className="h-px flex-1 bg-zinc-800"></div>
                           </div>
                           <div className="text-zinc-300 text-lg leading-loose whitespace-pre-wrap font-serif markdown-body">
                             <Markdown remarkPlugins={[remarkGfm]}>
-                              {ch.content || "（暂无内容）"}
+                              {ch.content || t.noContent}
                             </Markdown>
                           </div>
                         </div>
@@ -1986,7 +1986,7 @@ export default function App() {
             <div className="flex flex-col gap-3">
               <div>
                 <h3 className="text-sm font-bold text-white mb-1">{t.generatingChapters}</h3>
-                <p className="text-xs text-zinc-400">AI 正在为您构思精彩剧情，请稍候...</p>
+                <p className="text-xs text-zinc-400">{t.aiThinking}</p>
               </div>
               <button 
                 onClick={() => abortController?.abort()}
@@ -2391,7 +2391,7 @@ export default function App() {
                             <textarea
                               value={currentChapter.summary || ""}
                               onChange={(e) => setCurrentChapter({...currentChapter, summary: e.target.value})}
-                              placeholder={isGenerating ? "AI is summarizing..." : t.summarize + "..."}
+                              placeholder={isGenerating ? t.aiSummarizing || "AI is summarizing..." : t.summarize + "..."}
                               className="w-full bg-transparent text-xs text-zinc-400 leading-relaxed italic resize-none focus:outline-none"
                               rows={2}
                             />
@@ -2400,7 +2400,7 @@ export default function App() {
                         {isMarkdownPreview ? (
                           <div className="flex-1 p-8 overflow-y-auto markdown-body">
                             <Markdown remarkPlugins={[remarkGfm]}>
-                              {currentChapter.content || "（暂无内容）"}
+                              {currentChapter.content || t.noContent}
                             </Markdown>
                           </div>
                         ) : (
@@ -2426,7 +2426,7 @@ export default function App() {
                                 )}
                               >
                                 {isGenerating || isSegmenting ? <Square size={14} fill="currentColor" /> : <Sparkles size={14} className={isGenerating ? "animate-spin" : ""} />}
-                                {isGenerating || isSegmenting ? "停止" : t.aiAssist}
+                                {isGenerating || isSegmenting ? t.stop : t.aiAssist}
                               </button>
                               <TemplateSelector 
                                 type="chapter"
@@ -2452,7 +2452,7 @@ export default function App() {
                                 title={t.polish}
                               >
                                 {isPolishing ? <Square size={14} fill="currentColor" /> : <Zap size={14} className={isPolishing ? "animate-pulse" : ""} />}
-                                {isPolishing ? "停止" : t.polish}
+                                {isPolishing ? t.stop : t.polish}
                               </button>
                               <TemplateSelector 
                                 type="polish"
@@ -2512,7 +2512,7 @@ export default function App() {
                               {isSaving ? (
                                 <>
                                   <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                                  保存中...
+                                  {t.saving}
                                 </>
                               ) : (
                                 <>
@@ -2585,7 +2585,7 @@ export default function App() {
                             onChange={(e) => setNewOutlineVersionName(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && handleCreateOutlineVersion()}
                             className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500/50 transition-all"
-                            placeholder="e.g. V2.0"
+                            placeholder={t.versionNamePlaceholder || "e.g. V2.0"}
                           />
                         </div>
                       )}
@@ -2779,7 +2779,7 @@ export default function App() {
                                 className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-white text-xs focus:outline-none focus:border-emerald-500 transition-all"
                               />
                               <label className="block">
-                                <span className="sr-only">Choose cover file</span>
+                                <span className="sr-only">{t.chooseCoverFile || "Choose cover file"}</span>
                                 <input 
                                   type="file" 
                                   accept="image/*"
@@ -2813,7 +2813,7 @@ export default function App() {
                             <span className="text-sm text-zinc-500">{t.chapters}</span>
                           </div>
                           <p className="text-[10px] text-zinc-600 mt-2 italic">
-                            设置目标章节数可以帮助 AI 更好地控制故事节奏并在接近尾声时自动完结。
+                            {t.targetChaptersDesc}
                           </p>
                         </div>
                         <div>
@@ -2849,7 +2849,7 @@ export default function App() {
                             value={selectedNovel.description || ""}
                             onChange={(e) => handleSaveNovelDetails({ description: e.target.value })}
                             rows={6}
-                            placeholder="简述小说的主题、核心冲突和目标读者..."
+                            placeholder={t.novelDescPlaceholder}
                             className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-all resize-none text-sm leading-relaxed"
                           />
                         </div>
@@ -2863,7 +2863,7 @@ export default function App() {
                         <div className="flex items-center gap-3">
                           <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700">
                             <Globe size={12} className="text-emerald-500" />
-                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">System</span>
+                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{t.system}</span>
                           </div>
                           {selectedNovel.world_setting && (
                             <div className="flex items-center gap-2">
@@ -2901,7 +2901,7 @@ export default function App() {
                     >
                       <div className="flex flex-col flex-1 overflow-hidden">
                         <p className="text-[10px] text-zinc-500 mb-4 leading-relaxed">
-                          定义地理环境、力量体系、历史背景、社会规则等。AI 将参考这些设定来保证世界观的一致性。
+                          {t.worldSettingDesc}
                         </p>
                         <div className="flex-1 overflow-y-auto bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 shadow-inner">
                           {editMode['world'] ? (
@@ -2930,7 +2930,7 @@ export default function App() {
                         <div className="flex items-center gap-3">
                           <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700">
                             <Users size={12} className="text-emerald-500" />
-                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">Library</span>
+                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{t.library}</span>
                           </div>
                           <button 
                             onClick={() => toggleEditMode('characters')}
@@ -2943,7 +2943,7 @@ export default function App() {
                     >
                       <div className="flex flex-col flex-1 overflow-hidden">
                         <p className="text-[10px] text-zinc-500 mb-4 leading-relaxed">
-                          列出主要角色、性格特征、外貌描写及核心动机。
+                          {t.charactersDesc}
                         </p>
                         <div className="flex-1 overflow-y-auto bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 shadow-inner">
                           {editMode['characters'] ? (
@@ -2970,7 +2970,7 @@ export default function App() {
                         <div className="flex items-center gap-3">
                           <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700">
                             <GitBranch size={12} className="text-emerald-500" />
-                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">Threads</span>
+                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{t.threads}</span>
                           </div>
                           <button 
                             onClick={() => toggleEditMode('storylines')}
@@ -2983,7 +2983,7 @@ export default function App() {
                     >
                       <div className="flex flex-col flex-1 overflow-hidden">
                         <p className="text-[10px] text-zinc-500 mb-4 leading-relaxed">
-                          规划主线剧情、支线任务、伏笔和高潮点。
+                          {t.storylinesDesc}
                         </p>
                         <div className="flex-1 overflow-y-auto bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 shadow-inner">
                           {editMode['storylines'] ? (
@@ -3012,7 +3012,7 @@ export default function App() {
                         <div className="flex items-center gap-3">
                           <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700">
                             <Network size={12} className="text-emerald-500" />
-                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">Network</span>
+                            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{t.network}</span>
                           </div>
                           <button 
                             onClick={() => toggleEditMode('relationships')}
@@ -3025,7 +3025,7 @@ export default function App() {
                     >
                       <div className="flex flex-col flex-1 overflow-hidden">
                         <p className="text-[10px] text-zinc-500 mb-4 leading-relaxed">
-                          可视化展示角色之间的复杂联系与情感纽带。
+                          {t.relationshipsDesc}
                         </p>
                         <div className="flex-1 overflow-y-auto bg-zinc-900/30 border border-zinc-800/50 rounded-2xl p-6 shadow-inner">
                           {editMode['relationships'] ? (
@@ -3045,12 +3045,12 @@ export default function App() {
                       </div>
                     </Card>
 
-                    <Card title="可视化概览 (Visual Overview)" className="p-6">
+                    <Card title={t.visualOverview} className="p-6">
                       <div className="grid grid-cols-1 gap-8">
                         <div className="space-y-4">
                           <h4 className="text-sm font-bold text-zinc-400 flex items-center gap-2">
                             <TrendingUp size={16} className="text-emerald-500" />
-                            故事进展曲线 (Story Progression)
+                            {t.storyProgression}
                           </h4>
                           <div className="aspect-video bg-zinc-950 rounded-2xl border border-zinc-800 p-4">
                             <ResponsiveContainer width="100%" height="100%">
@@ -3070,10 +3070,10 @@ export default function App() {
                               </LineChart>
                             </ResponsiveContainer>
                             <div className="mt-2 flex justify-between text-[10px] text-zinc-600 font-bold uppercase tracking-widest">
-                              <span>开端</span>
-                              <span>发展</span>
-                              <span>高潮</span>
-                              <span>结局</span>
+                              <span>{t.beginning}</span>
+                              <span>{t.development}</span>
+                              <span>{t.climax}</span>
+                              <span>{t.ending}</span>
                             </div>
                           </div>
                         </div>
@@ -3178,17 +3178,17 @@ export default function App() {
                     <thead>
                       <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
                         <th className="px-4 py-3 font-bold">{t.novel}</th>
-                        <th className="px-4 py-3 font-bold">章节</th>
+                        <th className="px-4 py-3 font-bold">{t.chapters}</th>
                         <th className="px-4 py-3 font-bold">{t.date}</th>
                         <th className="px-4 py-3 font-bold">{t.tokens}</th>
-                        <th className="px-4 py-3 font-bold">类型</th>
+                        <th className="px-4 py-3 font-bold">{t.type}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800">
                       {tokenLogs.length > 0 ? (
                         tokenLogs.map(log => (
                           <tr key={log.id} className="text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
-                            <td className="px-4 py-4 font-medium">{log.novel_title || "Unknown"}</td>
+                            <td className="px-4 py-4 font-medium">{log.novel_title || t.unknown}</td>
                             <td className="px-4 py-4 text-zinc-500">{log.chapter_title || "-"}</td>
                             <td className="px-4 py-4 text-zinc-500">{formatDate(log.created_at, 'yyyy-MM-dd HH:mm:ss')}</td>
                             <td className="px-4 py-4 text-emerald-400 font-mono">{log.tokens?.toLocaleString() || 0}</td>
@@ -3209,7 +3209,7 @@ export default function App() {
                       ) : (
                         <tr>
                           <td colSpan={5} className="px-4 py-8 text-center text-zinc-600">
-                            No history logs found.
+                            {t.noLogs || "No history logs found."}
                           </td>
                         </tr>
                       )}
@@ -3230,7 +3230,7 @@ export default function App() {
               <header className="flex items-center justify-between">
                 <div>
                   <h2 className="text-3xl font-bold text-white mb-2">{t.scheduledTasks}</h2>
-                  <p className="text-zinc-500">Manage your automated generation tasks.</p>
+                  <p className="text-zinc-500">{t.tasksDesc || "Manage your automated generation tasks."}</p>
                 </div>
                 <button 
                   onClick={() => setShowTaskModal(true)}
@@ -3275,7 +3275,7 @@ export default function App() {
                                   ) : (
                                     <>
                                       <Send size={14} className="text-blue-400" />
-                                      <span className="font-medium">模拟发布</span>
+                                      <span className="font-medium">{t.mockPublish || "模拟发布"}</span>
                                     </>
                                   )}
                                 </div>
@@ -3318,7 +3318,7 @@ export default function App() {
                                     <button 
                                       onClick={() => handleRunTask(task.id)}
                                       className="p-2 text-zinc-500 hover:text-emerald-400 transition-colors"
-                                      title="立即执行"
+                                      title={t.runNow}
                                     >
                                       <Play size={16} />
                                     </button>
@@ -3378,7 +3378,7 @@ export default function App() {
                         : "text-zinc-500 hover:text-zinc-300"
                     )}
                   >
-                    {filter === 'all' ? "全部 (All)" : 
+                    {filter === 'all' ? t.all : 
                      filter === 'chapter' ? t.typeChapter : 
                      filter === 'outline' ? t.typeOutline : 
                      filter === 'summary' ? t.typeSummary : 
@@ -3454,8 +3454,8 @@ export default function App() {
                     <div className="p-4 bg-zinc-900 rounded-full mb-4">
                       <Plus size={32} />
                     </div>
-                    <p className="text-lg font-medium mb-2">暂无模板</p>
-                    <p className="text-sm opacity-60">点击右上角按钮添加您的第一个提示词模板</p>
+                    <p className="text-lg font-medium mb-2">{t.noTemplates}</p>
+                    <p className="text-sm opacity-60">{t.addFirstPrompt}</p>
                   </div>
                 )}
               </div>
@@ -3807,7 +3807,7 @@ export default function App() {
             >
               <header>
                 <h2 className="text-3xl font-bold text-white mb-2">{t.writingConfig}</h2>
-                <p className="text-zinc-500">Customize how AI generates your story content.</p>
+                <p className="text-zinc-500">{t.aiConfigDesc}</p>
               </header>
 
               <Card>
@@ -3843,7 +3843,7 @@ export default function App() {
                       </div>
                       <div>
                         <p className="text-sm font-medium text-zinc-200">{t.enforceWordCount}</p>
-                        <p className="text-xs text-zinc-500">Enable or disable word count limits for AI generation.</p>
+                        <p className="text-xs text-zinc-500">{t.targetChaptersDesc}</p>
                       </div>
                     </div>
                     <button 
@@ -3867,7 +3867,7 @@ export default function App() {
                       </div>
                       <div>
                         <p className="text-sm font-medium text-zinc-200">{t.autoSummarize}</p>
-                        <p className="text-xs text-zinc-500">Automatically generate a concise summary after completing a chapter.</p>
+                        <p className="text-xs text-zinc-500">{t.autoSummarize}</p>
                       </div>
                     </div>
                     <button 
@@ -3908,9 +3908,9 @@ export default function App() {
                               {writingConfig.layout === l && <div className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
                             </div>
                             <p className="text-[10px] opacity-60 leading-tight">
-                              {l === 'standard' && "Balanced paragraphs for a smooth reading experience."}
-                              {l === 'web' && "Optimized for mobile with frequent breaks and high readability."}
-                              {l === 'traditional' && "Classic literary style with indented first lines and dense text."}
+                              {l === 'standard' && t.layoutStandardDesc}
+                              {l === 'web' && t.layoutWebDesc}
+                              {l === 'traditional' && t.layoutTraditionalDesc}
                             </p>
                           </button>
                         ))}
@@ -3931,27 +3931,27 @@ export default function App() {
                         )}>
                           <p>
                             {writingConfig.layout === 'web' 
-                              ? "The sun dipped below the horizon, painting the sky in hues of violet and gold."
-                              : "The sun dipped below the horizon, painting the sky in hues of violet and gold. A cool breeze swept through the valley, carrying the scent of pine and damp earth."}
+                              ? t.layoutPreviewP1
+                              : t.layoutPreviewP1Long}
                           </p>
                           <p>
                             {writingConfig.layout === 'web'
-                              ? "Kael stood at the edge of the cliff, his cloak billowing behind him."
-                              : "Kael stood at the edge of the cliff, his cloak billowing behind him like a dark wing. He had waited for this moment for years, ever since the day the elders had spoken of the prophecy."}
+                              ? t.layoutPreviewP2
+                              : t.layoutPreviewP2Long}
                           </p>
                           {writingConfig.layout === 'web' && (
-                            <p>"It's time," he whispered to the wind.</p>
+                            <p>{t.layoutPreviewP3}</p>
                           )}
                           <p>
                             {writingConfig.layout === 'web'
-                              ? "The journey ahead would be long and treacherous."
-                              : "The journey ahead would be long and treacherous, but he was ready. With one last look at his home, he stepped forward into the unknown."}
+                              ? t.layoutPreviewP4
+                              : t.layoutPreviewP4Long}
                           </p>
                         </div>
 
                         <div className="mt-4 pt-4 border-t border-zinc-800/50 flex justify-between items-center opacity-40">
-                          <span className="text-[9px] font-mono">STYLE: {writingConfig.layout.toUpperCase()}</span>
-                          <span className="text-[9px] font-mono">PREVIEW MODE</span>
+                          <span className="text-[9px] font-mono">{t.style || "STYLE"}: {writingConfig.layout.toUpperCase()}</span>
+                          <span className="text-[9px] font-mono">{t.previewMode || "PREVIEW MODE"}</span>
                         </div>
                       </div>
                     </div>
@@ -3970,10 +3970,10 @@ export default function App() {
                           try {
                             localStorage.setItem("inkflow_ai_config", JSON.stringify(aiConfig));
                             localStorage.setItem("inkflow_writing_config", JSON.stringify(writingConfig));
-                            setToast({ message: t.settingsSaved || "Settings saved", type: 'success' });
-                          } catch (e) {
-                            setToast({ message: "Failed to save settings", type: 'error' });
-                          }
+                          setToast({ message: t.settingsSaved, type: 'success' });
+                        } catch (e) {
+                          setToast({ message: t.failedToSaveSettings, type: 'error' });
+                        }
                         }}
                         className="flex-[2] py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20"
                       >
@@ -4024,7 +4024,7 @@ export default function App() {
                       )}
                     >
                       <Send size={16} />
-                      模拟发布
+                      {t.mockPublish}
                     </button>
                   </div>
                 </div>
@@ -4128,7 +4128,7 @@ export default function App() {
             >
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
                 <h3 className="text-xl font-bold text-white">
-                  {editingPrompt?.id ? "编辑提示词" : "添加提示词"}
+                  {editingPrompt?.id ? t.editPrompt : t.addPrompt}
                 </h3>
                 <button 
                   onClick={() => setShowPromptModal(false)}
@@ -4147,7 +4147,7 @@ export default function App() {
                       value={editingPrompt?.name || ""}
                       onChange={(e) => setEditingPrompt(prev => ({ ...prev, name: e.target.value }))}
                       className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-zinc-700"
-                      placeholder="例如：玄幻风格章节生成"
+                      placeholder={t.promptNamePlaceholder}
                     />
                   </div>
                   <div className="space-y-2">
@@ -4172,13 +4172,13 @@ export default function App() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between ml-1">
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.promptContent}</label>
-                    <span className="text-[10px] text-zinc-700 font-mono">Supports: {"{title}, {chapter_num}"}</span>
+                    <span className="text-[10px] text-zinc-700 font-mono">{t.supports}: {"{title}, {chapter_num}"}</span>
                   </div>
                   <textarea
                     value={editingPrompt?.content || ""}
                     onChange={(e) => setEditingPrompt(prev => ({ ...prev, content: e.target.value }))}
                     className="w-full h-64 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-4 text-zinc-300 focus:outline-none focus:border-emerald-500/50 transition-all font-mono text-sm resize-none leading-relaxed"
-                    placeholder="输入提示词内容..."
+                    placeholder={t.promptContentPlaceholder || "Enter prompt content..."}
                   />
                 </div>
 
@@ -4190,7 +4190,7 @@ export default function App() {
                     {editingPrompt?.is_default === 1 && <Zap size={12} fill="currentColor" />}
                   </div>
                   <span className="text-sm text-zinc-300 font-medium">
-                    设为默认提示词 (Set as Default)
+                    {t.setAsDefault}
                   </span>
                 </div>
               </div>
