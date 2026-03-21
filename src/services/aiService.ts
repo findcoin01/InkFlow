@@ -359,7 +359,7 @@ export async function generateAIOutline(title: string, genre: string, config: AI
   }
 }
 
-export async function generateChapterTitle(content: string, config: AIConfig, language: string = 'en') {
+export async function generateChapterTitle(content: string, config: AIConfig, language: string = 'en'): Promise<{ text: string, tokens: number }> {
   const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   const fullPrompt = `根据以下小说章节内容，生成一个简明且贴切的章节标题。${langInstruction}\n\n内容：${content.slice(0, 2000)}\n\n任务：仅输出标题文本。不要带引号，不要带“第X章”，不要带前导破折号 or 点，仅输出标题。`;
 
@@ -379,10 +379,14 @@ export async function generateChapterTitle(content: string, config: AIConfig, la
         }
       });
 
-      return response.text?.trim() || "Untitled Chapter";
+      const text = response.text?.trim() || "Untitled Chapter";
+      return {
+        text,
+        tokens: (text.length + fullPrompt.length) / 4
+      };
     } catch (error) {
       console.error("Gemini Error:", error);
-      return "Untitled Chapter";
+      return { text: "Untitled Chapter", tokens: 0 };
     }
   } else {
     const openai = new OpenAI({
@@ -400,15 +404,18 @@ export async function generateChapterTitle(content: string, config: AIConfig, la
         max_tokens: 100,
       });
 
-      return response.choices[0].message.content?.trim() || "Untitled Chapter";
+      return {
+        text: response.choices[0].message.content?.trim() || "Untitled Chapter",
+        tokens: response.usage?.total_tokens || 0
+      };
     } catch (error) {
       console.error(`${config.provider} Error:`, error);
-      return "Untitled Chapter";
+      return { text: "Untitled Chapter", tokens: 0 };
     }
   }
 }
 
-export async function generateChapterTitleFromOutline(outline: string, chapterNum: number, config: AIConfig, language: string = 'en') {
+export async function generateChapterTitleFromOutline(outline: string, chapterNum: number, config: AIConfig, language: string = 'en'): Promise<{ text: string, tokens: number }> {
   const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   const fullPrompt = `根据以下小说大纲，为第 ${chapterNum} 章生成一个简明且贴切的章节标题。${langInstruction}\n\n大纲：\n${outline}\n\n任务：仅输出标题文本。不要带引号，不要带“第X章”，不要带前导破折号 or 点，仅输出标题。`;
 
@@ -428,10 +435,14 @@ export async function generateChapterTitleFromOutline(outline: string, chapterNu
         }
       });
 
-      return response.text?.trim() || "";
+      const text = response.text?.trim() || "";
+      return {
+        text,
+        tokens: (text.length + fullPrompt.length) / 4
+      };
     } catch (error) {
       console.error("Gemini Error:", error);
-      return "";
+      return { text: "", tokens: 0 };
     }
   } else {
     const openai = new OpenAI({
@@ -449,15 +460,18 @@ export async function generateChapterTitleFromOutline(outline: string, chapterNu
         max_tokens: 100,
       });
 
-      return response.choices[0].message.content?.trim() || "";
+      return {
+        text: response.choices[0].message.content?.trim() || "",
+        tokens: response.usage?.total_tokens || 0
+      };
     } catch (error) {
       console.error(`${config.provider} Error:`, error);
-      return "";
+      return { text: "", tokens: 0 };
     }
   }
 }
 
-export async function generateChapterSummary(content: string, config: AIConfig, language: string = 'en', promptTemplate?: string) {
+export async function generateChapterSummary(content: string, config: AIConfig, language: string = 'en', promptTemplate?: string): Promise<{ text: string, tokens: number }> {
   const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   const defaultPrompt = `将以下小说章节总结为简明摘要（最多 200 字）。重点关注角色发展、情节推进和世界观细节。${langInstruction}\n\n内容：${content}\n\n任务：仅输出摘要文本。`;
   
@@ -490,10 +504,14 @@ export async function generateChapterSummary(content: string, config: AIConfig, 
           maxOutputTokens: 1000 
         }
       });
-      return response.text?.trim() || "";
+      const text = response.text?.trim() || "";
+      return {
+        text,
+        tokens: (text.length + fullPrompt.length) / 4
+      };
     } catch (error) {
       console.error("Gemini Summary Error:", error);
-      return "";
+      return { text: "", tokens: 0 };
     }
   } else {
     const openai = new OpenAI({
@@ -509,10 +527,13 @@ export async function generateChapterSummary(content: string, config: AIConfig, 
         top_p: params.top_p,
         max_tokens: 1000,
       });
-      return response.choices[0].message.content?.trim() || "";
+      return {
+        text: response.choices[0].message.content?.trim() || "",
+        tokens: response.usage?.total_tokens || 0
+      };
     } catch (error) {
       console.error(`${config.provider} Summary Error:`, error);
-      return "";
+      return { text: "", tokens: 0 };
     }
   }
 }
@@ -717,7 +738,7 @@ export async function extractNovelMetadata(
   }
 }
 
-export async function refactorWorldSetting(content: string, config: AIConfig, language: string = 'en', promptTemplate?: string) {
+export async function refactorWorldSetting(content: string, config: AIConfig, language: string = 'en', promptTemplate?: string): Promise<{ text: string, tokens: number }> {
   const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   const defaultPrompt = `将以下小说世界设定内容重构为更结构化的 markdown 格式。
   ${langInstruction}
@@ -749,7 +770,7 @@ export async function refactorWorldSetting(content: string, config: AIConfig, la
 
   const params = getParams(config);
 
-    if (config.provider === 'gemini' && !config.baseUrl) {
+  if (config.provider === 'gemini' && !config.baseUrl) {
     const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
     try {
       const response = await ai.models.generateContent({
@@ -762,10 +783,14 @@ export async function refactorWorldSetting(content: string, config: AIConfig, la
           maxOutputTokens: params.max_tokens
         }
       });
-      return response.text?.trim() || content;
+      const text = response.text?.trim() || content;
+      return {
+        text,
+        tokens: (text.length + fullPrompt.length) / 4
+      };
     } catch (error) {
       console.error("Gemini Refactor Error:", error);
-      throw new Error(formatAIError(error, "Gemini"));
+      return { text: content, tokens: 0 };
     }
   } else {
     const openai = new OpenAI({
@@ -781,10 +806,13 @@ export async function refactorWorldSetting(content: string, config: AIConfig, la
         top_p: params.top_p,
         max_tokens: params.max_tokens,
       });
-      return response.choices[0].message.content?.trim() || content;
+      return {
+        text: response.choices[0].message.content?.trim() || content,
+        tokens: response.usage?.total_tokens || 0
+      };
     } catch (error) {
       console.error(`${config.provider} Refactor Error:`, error);
-      throw new Error(formatAIError(error, config.provider));
+      return { text: content, tokens: 0 };
     }
   }
 }

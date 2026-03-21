@@ -415,7 +415,12 @@ export default function App() {
     fetchPrompts();
     fetchLogs();
     fetchAIConfigs();
-  }, []);
+    
+    // If we are in novel view, also refresh the selected novel details
+    if ((activeTab === "editor" || activeTab === "world") && selectedNovel) {
+      fetchNovelDetails(selectedNovel.id, currentChapter?.id);
+    }
+  }, [activeTab]);
 
   const fetchNovels = async () => {
     try {
@@ -599,7 +604,11 @@ export default function App() {
 
       const active = data.outlines?.find((o: OutlineVersion) => o.is_active === 1) || data.outlines?.[0] || null;
       setActiveOutline(active);
-      setActiveTab("editor");
+      
+      // Only switch to editor if we're not already in a novel-related view
+      if (activeTab !== "editor" && activeTab !== "world") {
+        setActiveTab("editor");
+      }
     } catch (e: any) {
       console.error(e);
       setToast({ message: e.message || "Failed to fetch novel details", type: 'error' });
@@ -644,9 +653,9 @@ export default function App() {
     setIsRefactoringWorld(true);
     try {
       const promptTemplate = getActivePrompt('refactor');
-      const refactored = await refactorWorldSetting(selectedNovel.world_setting, aiConfig, lang, promptTemplate);
+      const { text: refactored, tokens } = await refactorWorldSetting(selectedNovel.world_setting, aiConfig, lang, promptTemplate);
       if (refactored) {
-        await handleSaveNovelDetails({ world_setting: refactored });
+        await handleSaveNovelDetails({ world_setting: refactored, token_usage: tokens });
       }
     } catch (error: any) {
       console.error("Error refactoring world setting:", error);
@@ -769,10 +778,20 @@ export default function App() {
     if (!currentChapter || !currentChapter.content || isGeneratingTitle) return;
     setIsGeneratingTitle(true);
     try {
-      const title = await generateChapterTitle(currentChapter.content, aiConfig, lang);
-      setCurrentChapter({ ...currentChapter, title });
+      const { text: title, tokens } = await generateChapterTitle(currentChapter.content, aiConfig, lang);
+      if (title) {
+        setCurrentChapter({ ...currentChapter, title });
+        // Save to server
+        await fetch(`/api/chapters/${currentChapter.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, token_usage: tokens }),
+        });
+        setToast({ message: t.generateTitle + " " + t.active, type: 'success' });
+      }
     } catch (e) {
       console.error(e);
+      setToast({ message: "Failed to generate title", type: 'error' });
     } finally {
       setIsGeneratingTitle(false);
     }
@@ -991,7 +1010,7 @@ export default function App() {
     setIsGenerating(true);
     try {
       const promptTemplate = getActivePrompt('summary');
-      const summary = await generateChapterSummary(contentToSummarize, aiConfig, lang, promptTemplate);
+      const { text: summary, tokens } = await generateChapterSummary(contentToSummarize, aiConfig, lang, promptTemplate);
       if (summary) {
         setCurrentChapter(prev => prev ? { ...prev, summary } : null);
         setChapters(prev => prev.map(ch => ch.id === currentChapter.id ? { ...ch, summary } : ch));
@@ -999,7 +1018,7 @@ export default function App() {
         const res = await fetch(`/api/chapters/${currentChapter.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ summary }),
+          body: JSON.stringify({ summary, token_usage: tokens }),
         });
         
         if (!res.ok) throw new Error(t.saveError || "Failed to save summary");
@@ -1042,7 +1061,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           content: streamedText,
-          token_usage: Math.round(streamedText.length / 4)
+          token_usage: Math.round((streamedText.length + prompt.length + context.length) / 4)
         }),
       });
       
@@ -1095,7 +1114,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           content: finalContent,
-          token_usage: Math.round(streamedText.length / 4)
+          token_usage: Math.round((streamedText.length + prompt.length + context.length) / 4)
         }),
       });
       
@@ -1155,7 +1174,7 @@ export default function App() {
         }
         
         currentContent += (currentContent ? "\n\n" : "") + streamedText;
-        totalTokens += streamedText.length / 4;
+        totalTokens += (streamedText.length + prompt.length + context.length) / 4;
         
         // If we already reached a decent length, we can stop early if it's not the last segment
         if (currentContent.length > writingConfig.maxWords * 0.8 && i < segments - 1) {
@@ -1246,7 +1265,8 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           version_name: `AI 生成 ${formatDate(new Date(), "HH:mm")}`,
-          content: result.text
+          content: result.text,
+          token_usage: result.tokens
         }),
       });
       
@@ -1273,7 +1293,16 @@ export default function App() {
       
       if (!outlineTitle && activeOutlineContent) {
         setToast({ message: "Generating chapter title from outline...", type: 'success' });
-        outlineTitle = await generateChapterTitleFromOutline(activeOutlineContent, nextChapterNum, aiConfig, lang);
+        const titleRes = await generateChapterTitleFromOutline(activeOutlineContent, nextChapterNum, aiConfig, lang);
+        outlineTitle = titleRes.text;
+        // Log tokens for title generation
+        if (titleRes.tokens > 0) {
+          await fetch("/api/token-logs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ novel_id: selectedNovel.id, operation_type: "生成标题", tokens: Math.round(titleRes.tokens) }),
+          }).catch(console.error);
+        }
       }
       
       const title = outlineTitle || `${t.chapters} ${nextChapterNum}`;
@@ -1357,9 +1386,12 @@ export default function App() {
         
         // Try to find title in outline
         let outlineTitle = getChapterTitleFromOutline(activeOutlineContent, nextChapterNum);
+        let totalTokens = 0;
 
         if (!outlineTitle && activeOutlineContent) {
-          outlineTitle = await generateChapterTitleFromOutline(activeOutlineContent, nextChapterNum, aiConfig, lang);
+          const titleRes = await generateChapterTitleFromOutline(activeOutlineContent, nextChapterNum, aiConfig, lang);
+          outlineTitle = titleRes.text;
+          totalTokens += titleRes.tokens;
         }
 
         const defaultTitle = outlineTitle || `${t.chapters} ${nextChapterNum}`;
@@ -1403,13 +1435,20 @@ export default function App() {
         // 3. Generate Title (only if not from outline)
         let finalTitle = defaultTitle;
         if (!outlineTitle) {
-          finalTitle = await generateChapterTitle(fullContent, aiConfig, lang);
+          const titleRes = await generateChapterTitle(fullContent, aiConfig, lang);
+          finalTitle = titleRes.text;
+          totalTokens += titleRes.tokens;
         }
 
         // 4. Generate Summary
-        const summary = await generateChapterSummary(fullContent, aiConfig, lang);
+        const summaryRes = await generateChapterSummary(fullContent, aiConfig, lang);
+        const summary = summaryRes.text;
+        totalTokens += summaryRes.tokens;
 
         // 5. Update chapter in DB
+        // Add content tokens (estimate)
+        totalTokens += (fullContent.length + prompt.length + context.length) / 4;
+
         await fetch(`/api/chapters/${chapterData.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -1417,7 +1456,7 @@ export default function App() {
             title: finalTitle,
             content: fullContent,
             summary: summary,
-            token_usage: Math.round(fullContent.length / 4)
+            token_usage: Math.round(totalTokens)
           }),
         });
         

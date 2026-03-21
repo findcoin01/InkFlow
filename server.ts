@@ -447,6 +447,22 @@ async function startServer() {
   });
 
   // Get all novels with stats
+  app.post("/api/token-logs", (req, res) => {
+    const { novel_id, operation_type, tokens } = req.body;
+    if (!novel_id || !operation_type || !tokens) {
+      return res.status(400).json({ error: "novel_id, operation_type, and tokens are required" });
+    }
+    try {
+      db.prepare(
+        "INSERT INTO token_logs (novel_id, operation_type, tokens) VALUES (?, ?, ?)"
+      ).run(novel_id, operation_type, tokens);
+      res.status(201).json({ success: true });
+    } catch (error) {
+      console.error("Failed to log tokens:", error);
+      res.status(500).json({ error: "Failed to log tokens" });
+    }
+  });
+
   app.get("/api/novels", (req, res) => {
     try {
       const novels = db.prepare(`
@@ -562,8 +578,11 @@ async function startServer() {
 
   // Outline Version Routes
   app.post("/api/novels/:id/outlines", (req, res) => {
-    const { version_name, content } = req.body;
+    const { version_name, content, token_usage } = req.body;
     db.prepare("INSERT INTO outline_versions (novel_id, version_name, content, is_active) VALUES (?, ?, ?, 0)").run(req.params.id, version_name, content);
+    if (token_usage) {
+      db.prepare("INSERT INTO token_logs (novel_id, operation_type, tokens) VALUES (?, ?, ?)").run(req.params.id, "生成大纲", token_usage);
+    }
     logOperation("创建大纲版本", { 小说ID: req.params.id, 版本: version_name });
     res.json({ success: true });
   });
