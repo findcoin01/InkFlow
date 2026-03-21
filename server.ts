@@ -205,8 +205,8 @@ async function startServer() {
       { name: '标准大纲优化', type: 'outline', content: '优化以下大纲。确保逻辑连贯和引人入胜的角色弧线。\n\n大纲内容：\n{context}', is_default: 1 },
       { name: '冲突强化大纲', type: 'outline', content: '分析并优化以下大纲，增加更多的冲突点和反转，提高故事的张力。\n\n大纲内容：\n{context}', is_default: 0 },
       
-      { name: '简明摘要', type: 'summary', content: '对以下章节内容提供简明摘要，突出关键情节和角色发展。\n\n章节内容：\n{context}', is_default: 1 },
-      { name: '详细剧情回顾', type: 'summary', content: '详细总结本章的剧情走向、角色变动和伏笔设置，为后续创作提供参考。\n\n章节内容：\n{context}', is_default: 0 },
+      { name: '简明摘要', type: 'summary', content: '将以下小说章节总结为简明摘要（最多 200 字）。重点关注角色发展、情节推进和世界观细节。{langInstruction}\n\n内容：{context}\n\n任务：仅输出摘要文本。', is_default: 1 },
+      { name: '详细剧情回顾', type: 'summary', content: '详细总结本章的剧情走向、角色变动和伏笔设置，为后续创作提供参考。{langInstruction}\n\n内容：{context}\n\n任务：提供深度剧情分析和伏笔记录。', is_default: 0 },
       
       { name: '标准结构化', type: 'refactor', content: '将以下小说世界设定内容重构为更结构化的 markdown 格式。使用项目符号和清晰的标题。\n\n设定内容：\n{context}', is_default: 1 },
       { name: '深度设定扩展', type: 'refactor', content: '在保持原有设定的基础上，对以下世界观内容进行深度扩展和逻辑补全，使其更加严谨。\n\n设定内容：\n{context}', is_default: 0 },
@@ -240,6 +240,13 @@ async function startServer() {
       const insertPrompt = db.prepare("INSERT INTO prompts (name, type, content, is_default) VALUES (?, ?, ?, ?)");
       polishPrompts.forEach(p => insertPrompt.run(p.name, p.type, p.content, p.is_default));
     }
+
+    // Update existing summary prompts to use the new recommended format
+    db.prepare(`
+      UPDATE prompts 
+      SET content = '将以下小说章节总结为简明摘要（最多 200 字）。重点关注角色发展、情节推进和世界观细节。{langInstruction}\n\n内容：{context}\n\n任务：仅输出摘要文本。'
+      WHERE type = 'summary' AND name = '简明摘要' AND content LIKE '%对以下章节内容提供简明摘要%'
+    `).run();
 
     // Update existing prompts to use {context} and {task} if they use old placeholders
     const existingPrompts = db.prepare("SELECT id, content FROM prompts").all() as { id: number, content: string }[];
