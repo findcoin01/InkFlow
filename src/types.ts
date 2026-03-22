@@ -84,7 +84,7 @@ export interface Prompt {
   id: number;
   name: string;
   content: string;
-  type: 'outline' | 'chapter' | 'summary' | 'refactor' | 'polish';
+  type: 'outline' | 'chapter' | 'summary' | 'refactor' | 'polish' | 'description';
   is_default: number;
   created_at: string;
 }

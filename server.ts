@@ -213,7 +213,10 @@ async function startServer() {
       
       { name: '标准润色', type: 'polish', content: '请对以下小说片段进行润色。在保持原意和情节的基础上，优化遣词造句，增强画面感和感染力。\n\n片段内容：\n{context}', is_default: 1 },
       { name: '风格转换 (古风)', type: 'polish', content: '将以下小说片段重构为唯美古风风格。使用更具古典韵味的词汇，增加意境描写。\n\n片段内容：\n{context}', is_default: 0 },
-      { name: '情节扩充', type: 'polish', content: '在保持原有情节走向的基础上，对以下片段进行扩充。增加更多的细节描写、心理活动和环境渲染，使内容更丰满。\n\n片段内容：\n{context}', is_default: 0 }
+      { name: '情节扩充', type: 'polish', content: '在保持原有情节走向的基础上，对以下片段进行扩充。增加更多的细节描写、心理活动和环境渲染，使内容更丰满。\n\n片段内容：\n{context}', is_default: 0 },
+      
+      { name: '标准简介', type: 'description', content: '根据以下小说大纲，撰写一段引人入胜的小说简介。简介字数控制在 80 到 150 字之间，突出核心冲突、主要人物以及故事的独特卖点。\n\n大纲：\n{outline}\n\n{langInstruction}', is_default: 1 },
+      { name: '悬疑风格简介', type: 'description', content: '根据以下小说大纲，撰写一段充满悬念和神秘感的小说简介。字数 80-150 字，通过抛出核心谜团来吸引读者。\n\n大纲：\n{outline}\n\n{langInstruction}', is_default: 0 }
     ];
     const insertPrompt = db.prepare("INSERT INTO prompts (name, type, content, is_default) VALUES (?, ?, ?, ?)");
     defaultPrompts.forEach(p => insertPrompt.run(p.name, p.type, p.content, p.is_default));
@@ -239,6 +242,16 @@ async function startServer() {
       ];
       const insertPrompt = db.prepare("INSERT INTO prompts (name, type, content, is_default) VALUES (?, ?, ?, ?)");
       polishPrompts.forEach(p => insertPrompt.run(p.name, p.type, p.content, p.is_default));
+    }
+
+    const hasDescription = db.prepare("SELECT id FROM prompts WHERE type = 'description'").get();
+    if (!hasDescription) {
+      const descriptionPrompts = [
+        { name: '标准简介', type: 'description', content: '根据以下小说大纲，撰写一段引人入胜的小说简介。简介字数控制在 80 到 150 字之间，突出核心冲突、主要人物以及故事的独特卖点。\n\n大纲：\n{outline}\n\n{langInstruction}', is_default: 1 },
+        { name: '悬疑风格简介', type: 'description', content: '根据以下小说大纲，撰写一段充满悬念和神秘感的小说简介。字数 80-150 字，通过抛出核心谜团来吸引读者。\n\n大纲：\n{outline}\n\n{langInstruction}', is_default: 0 }
+      ];
+      const insertPrompt = db.prepare("INSERT INTO prompts (name, type, content, is_default) VALUES (?, ?, ?, ?)");
+      descriptionPrompts.forEach(p => insertPrompt.run(p.name, p.type, p.content, p.is_default));
     }
 
     // Update existing summary prompts to use the new recommended format
@@ -512,7 +525,7 @@ async function startServer() {
   
   app.patch("/api/novels/:id", (req, res) => {
     try {
-      const { title, description, target_chapters, characters, storylines, world_setting, cover_url, relationships, status, last_supplement_at, token_usage } = req.body;
+      const { title, description, target_chapters, characters, storylines, world_setting, cover_url, relationships, status, last_supplement_at, token_usage, token_type } = req.body;
       
       const sanitize = (val: any) => {
         if (val === undefined) return null;
@@ -533,6 +546,7 @@ async function startServer() {
         sanitize(relationships),
         sanitize(status),
         last_supplement_at ?? null,
+        token_usage ?? 0,
         req.params.id
       ];
 
@@ -547,12 +561,13 @@ async function startServer() {
             cover_url = COALESCE(?, cover_url),
             relationships = COALESCE(?, relationships),
             status = COALESCE(?, status),
-            last_supplement_at = COALESCE(?, last_supplement_at)
+            last_supplement_at = COALESCE(?, last_supplement_at),
+            total_tokens = total_tokens + ?
         WHERE id = ?
       `).run(...params);
 
       if (token_usage) {
-        db.prepare("INSERT INTO token_logs (novel_id, tokens, type) VALUES (?, ?, 'supplement')").run(req.params.id, token_usage);
+        db.prepare("INSERT INTO token_logs (novel_id, tokens, type) VALUES (?, ?, ?)").run(req.params.id, token_usage, token_type || 'novel_update');
       }
       
       logOperation("更新小说", { ID: req.params.id, 标题: title });

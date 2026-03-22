@@ -760,7 +760,7 @@ export default function App() {
       const promptTemplate = getActivePrompt('refactor');
       const { text: refactored, tokens } = await refactorWorldSetting(selectedNovel.world_setting, aiConfig, lang, promptTemplate);
       if (refactored) {
-        await handleSaveNovelDetails({ world_setting: refactored, token_usage: tokens });
+        await handleSaveNovelDetails({ world_setting: refactored, token_usage: tokens, token_type: 'refactor' } as any);
       }
     } catch (error: any) {
       console.error("Error refactoring world setting:", error);
@@ -790,8 +790,9 @@ export default function App() {
         await handleSaveNovelDetails({
           ...result.data,
           last_supplement_at: new Date().toISOString(),
-          token_usage: result.usage?.total_tokens || 0
-        });
+          token_usage: result.usage?.total_tokens || 0,
+          token_type: 'supplement'
+        } as any);
       }
     } catch (error: any) {
       console.error("Failed to supplement novel metadata:", error);
@@ -911,10 +912,10 @@ export default function App() {
     }
     setIsGenerating(true);
     try {
-      const promptTemplate = getActivePrompt('summary');
+      const promptTemplate = getActivePrompt('description');
       const { text: description, tokens } = await generateNovelDescription(activeOutline.content, aiConfig, lang, promptTemplate);
       if (description) {
-        handleSaveNovelDetails({ description });
+        handleSaveNovelDetails({ description, token_usage: tokens, token_type: 'description' } as any);
         setToast({ message: t.generateDescriptionLabel + " " + t.active, type: 'success' });
       }
     } catch (error: any) {
@@ -3573,7 +3574,7 @@ export default function App() {
               </header>
 
               <div className="flex items-center gap-2 p-1 bg-zinc-900/50 border border-zinc-800 rounded-xl w-fit">
-                {['all', 'chapter', 'outline', 'summary', 'refactor', 'polish'].map((filter) => (
+                {['all', 'chapter', 'outline', 'summary', 'description', 'refactor', 'polish'].map((filter) => (
                   <button
                     key={filter}
                     onClick={() => setPromptFilter(filter)}
@@ -3588,6 +3589,7 @@ export default function App() {
                      filter === 'chapter' ? t.typeChapter : 
                      filter === 'outline' ? t.typeOutline : 
                      filter === 'summary' ? t.typeSummary : 
+                     filter === 'description' ? t.typeDescription : 
                      filter === 'refactor' ? t.typeRefactor : t.typePolish}
                   </button>
                 ))}
@@ -3615,6 +3617,7 @@ export default function App() {
                           {prompt.type === 'chapter' ? t.typeChapter : 
                            prompt.type === 'outline' ? t.typeOutline : 
                            prompt.type === 'summary' ? t.typeSummary : 
+                           prompt.type === 'description' ? t.typeDescription : 
                            prompt.type === 'refactor' ? t.typeRefactor : t.typePolish}
                         </p>
                       </div>
@@ -4367,6 +4370,7 @@ export default function App() {
                         <option value="chapter">{t.typeChapter}</option>
                         <option value="outline">{t.typeOutline}</option>
                         <option value="summary">{t.typeSummary}</option>
+                        <option value="description">{t.typeDescription}</option>
                         <option value="refactor">{t.typeRefactor}</option>
                         <option value="polish">{t.typePolish}</option>
                       </select>

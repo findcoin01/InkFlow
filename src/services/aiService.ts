@@ -478,7 +478,10 @@ export async function generateNovelDescription(outline: string, config: AIConfig
   let fullPrompt = `You are a professional novel editor. Based on the following novel outline, write a compelling novel description (summary). The description should be between 80 and 150 words, highlighting the core conflict, main characters, and unique selling points of the story.\n\nOutline:\n${outline}\n\n${langInstruction}`;
   
   if (promptTemplate) {
-    fullPrompt = promptTemplate.replace(/{outline}/g, outline).replace(/{langInstruction}/g, langInstruction);
+    fullPrompt = promptTemplate
+      .replace(/{outline}/g, outline)
+      .replace(/{context}/g, outline)
+      .replace(/{langInstruction}/g, langInstruction);
   }
 
   if (config.provider === 'gemini' && !config.baseUrl) {
