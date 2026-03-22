@@ -722,20 +722,30 @@ export default function App() {
 
   const handleSaveNovelDetails = async (updates: Partial<Novel>) => {
     if (!selectedNovel) return;
+    
+    // Optimistically update local state for better responsiveness
+    const previousNovel = { ...selectedNovel };
+    const newNovel = { ...selectedNovel, ...updates };
+    setSelectedNovel(newNovel);
+    setNovels(novels.map(n => n.id === selectedNovel.id ? newNovel : n));
+
     try {
       const response = await fetch(`/api/novels/${selectedNovel.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
       });
-      if (response.ok) {
-        const updatedNovel = await response.json();
-        setSelectedNovel(updatedNovel);
-        setNovels(novels.map(n => n.id === updatedNovel.id ? updatedNovel : n));
-      } else {
+      if (!response.ok) {
+        // Rollback on error
+        setSelectedNovel(previousNovel);
+        setNovels(novels.map(n => n.id === selectedNovel.id ? previousNovel : n));
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || t.saveError || "Failed to save novel details");
       }
+      // Sync with server response just in case
+      const updatedNovel = await response.json();
+      setSelectedNovel(updatedNovel);
+      setNovels(novels.map(n => n.id === updatedNovel.id ? updatedNovel : n));
     } catch (error: any) {
       console.error("Failed to save novel details:", error);
       setToast({ message: error.message || "Failed to save novel details", type: 'error' });
@@ -3431,9 +3441,17 @@ export default function App() {
                                   ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                   : log.type === 'supplement'
                                   ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                  : log.type === 'description'
+                                  ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                                  : log.type === 'generate_outline'
+                                  ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
                                   : "bg-blue-500/10 text-blue-400 border-blue-500/20"
                               )}>
-                                {log.type === 'generation' ? t.generateChapter : log.type === 'supplement' ? t.aiSupplement : t.polish}
+                                {log.type === 'generation' ? t.generateChapter : 
+                                 log.type === 'supplement' ? t.aiSupplement : 
+                                 log.type === 'description' ? t.typeDescription : 
+                                 log.type === 'generate_outline' ? t.typeOutline : 
+                                 t.polish}
                               </span>
                             </td>
                           </tr>
