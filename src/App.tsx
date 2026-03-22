@@ -31,8 +31,12 @@ import {
   Cpu,
   Zap,
   Activity,
-  Wand2
+  Wand2,
+  Download,
+  FileDown
 } from "lucide-react";
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 import { 
   LineChart, 
   Line, 
@@ -345,7 +349,7 @@ export default function App() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   useEffect(() => {
     if (toast) {
@@ -612,6 +616,100 @@ export default function App() {
     } catch (e: any) {
       console.error(e);
       setToast({ message: e.message || "Failed to fetch novel details", type: 'error' });
+    }
+  };
+
+  const exportNovel = async (novel: Novel, format: 'markdown' | 'epub') => {
+    try {
+      setToast({ message: t.exporting, type: 'info' });
+      const res = await fetch(`/api/novels/${novel.id}`);
+      if (!res.ok) throw new Error(t.fetchError);
+      const data = await res.json();
+      const chapters: Chapter[] = data.chapters || [];
+
+      if (format === 'markdown') {
+        let content = `# ${novel.title}\n\n`;
+        if (novel.description) content += `## ${t.novelDescription}\n${novel.description}\n\n`;
+        
+        chapters.forEach((ch, index) => {
+          content += `### ${t.chapterPrefix}${index + 1}${t.chapterSuffix || ''} ${ch.title}\n\n`;
+          content += `${ch.content}\n\n`;
+        });
+
+        const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+        saveAs(blob, `${novel.title}.md`);
+      } else if (format === 'epub') {
+        const zip = new JSZip();
+        
+        // EPUB structure
+        zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+        
+        const containerXml = `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`;
+        zip.folder("META-INF").file("container.xml", containerXml);
+
+        const contentOpf = `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="pub-id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="pub-id">urn:uuid:${novel.id}</dc:identifier>
+    <dc:title>${novel.title}</dc:title>
+    <dc:language>zh</dc:language>
+    <dc:creator>InkFlow</dc:creator>
+    <meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d+Z$/, "Z")}</meta>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    ${chapters.map((_, i) => `<item id="ch${i}" href="ch${i}.xhtml" media-type="application/xhtml+xml"/>`).join('\n    ')}
+    <item id="css" href="style.css" media-type="text/css"/>
+  </manifest>
+  <spine>
+    <itemref idref="nav"/>
+    ${chapters.map((_, i) => `<itemref idref="ch${i}"/>`).join('\n    ')}
+  </spine>
+</package>`;
+        
+        const oebps = zip.folder("OEBPS");
+        oebps.file("content.opf", contentOpf);
+        oebps.file("style.css", "body { font-family: sans-serif; line-height: 1.6; padding: 1em; } h1, h2, h3 { text-align: center; } p { text-indent: 2em; margin: 0.5em 0; }");
+
+        const navXhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Navigation</title></head>
+<body>
+  <nav epub:type="toc">
+    <h1>${novel.title}</h1>
+    <ol>
+      ${chapters.map((ch, i) => `<li><a href="ch${i}.xhtml">${ch.title}</a></li>`).join('\n      ')}
+    </ol>
+  </nav>
+</body>
+</html>`;
+        oebps.file("nav.xhtml", navXhtml);
+
+        chapters.forEach((ch, i) => {
+          const chXhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>${ch.title}</title><link rel="stylesheet" type="text/css" href="style.css"/></head>
+<body>
+  <h2>${ch.title}</h2>
+  ${(ch.content || "").split('\n').filter(p => p.trim()).map(p => `<p>${p.trim()}</p>`).join('\n  ')}
+</body>
+</html>`;
+          oebps.file(`ch${i}.xhtml`, chXhtml);
+        });
+
+        const blob = await zip.generateAsync({ type: "blob" });
+        saveAs(blob, `${novel.title}.epub`);
+      }
+
+      setToast({ message: t.exportSuccess, type: 'success' });
+    } catch (error) {
+      console.error("Export error:", error);
+      setToast({ message: t.exportError, type: 'error' });
     }
   };
 
@@ -2119,13 +2217,39 @@ export default function App() {
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {novels.map(novel => (
                   <Card key={novel.id} className="group hover:border-emerald-500/50 transition-all cursor-pointer relative" onClick={() => fetchNovelDetails(novel.id)}>
-                    <button 
-                      onClick={(e) => handleDeleteNovel(e, novel.id)}
-                      className="absolute top-4 right-4 p-2 text-zinc-600 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all z-10"
-                      title={t.deleteNovel}
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <div className="absolute top-4 right-4 flex gap-2 z-10 opacity-0 group-hover:opacity-100 transition-all">
+                      <div className="relative group/export">
+                        <button 
+                          onClick={(e) => e.stopPropagation()}
+                          className="p-2 text-zinc-600 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg"
+                        >
+                          <Download size={16} />
+                        </button>
+                        <div className="absolute right-0 top-full mt-1 w-32 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl hidden group-hover/export:block z-20">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); exportNovel(novel, 'markdown'); }}
+                            className="w-full text-left px-3 py-2 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-2"
+                          >
+                            <FileDown size={12} />
+                            Markdown
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); exportNovel(novel, 'epub'); }}
+                            className="w-full text-left px-3 py-2 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-2"
+                          >
+                            <BookOpen size={12} />
+                            EPUB
+                          </button>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={(e) => handleDeleteNovel(e, novel.id)}
+                        className="p-2 text-zinc-600 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg"
+                        title={t.deleteNovel}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                     <div className="flex gap-4 mb-4">
                       <div className="w-20 h-28 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-600 shadow-xl overflow-hidden">
                         {novel.cover_url ? (
@@ -2140,6 +2264,20 @@ export default function App() {
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-800">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{t.novelStatus}</p>
+                        <p className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full inline-block mt-1", 
+                          novel.status === 'completed' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-zinc-800 text-zinc-400 border border-zinc-700"
+                        )}>
+                          {novel.status === 'completed' ? t.novelCompleted : t.novelDraft}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{t.totalWords}</p>
+                        <p className="text-sm text-zinc-200 font-mono">{(novel.total_words || 0).toLocaleString()}</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 pt-4 mt-2">
                       <div>
                         <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{t.progress}</p>
                         <div className="flex items-center gap-2">
@@ -2228,6 +2366,30 @@ export default function App() {
                   >
                     <Trash2 size={20} />
                   </button>
+                  <div className="relative group/export">
+                    <button 
+                      className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex items-center gap-2 transition-all"
+                    >
+                      <Download size={18} />
+                      {t.export}
+                    </button>
+                    <div className="absolute right-0 top-full mt-1 w-40 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl hidden group-hover/export:block z-20">
+                      <button 
+                        onClick={() => exportNovel(selectedNovel, 'markdown')}
+                        className="w-full text-left px-4 py-3 text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-3"
+                      >
+                        <FileDown size={16} />
+                        {t.exportMarkdown}
+                      </button>
+                      <button 
+                        onClick={() => exportNovel(selectedNovel, 'epub')}
+                        className="w-full text-left px-4 py-3 text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-3"
+                      >
+                        <BookOpen size={16} />
+                        {t.exportEpub}
+                      </button>
+                    </div>
+                  </div>
                   <button 
                     onClick={() => setShowPreview(true)}
                     className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex items-center gap-2 transition-all"
@@ -3417,7 +3579,7 @@ export default function App() {
                           <button 
                             onClick={() => handleSetDefaultPrompt(prompt.id, prompt.type)}
                             className="p-2 text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all"
-                            title={t.setDefault}
+                            title={t.setAsDefault}
                           >
                             <Sparkles size={16} />
                           </button>

@@ -469,6 +469,7 @@ async function startServer() {
         SELECT n.*, 
                (SELECT COUNT(*) FROM chapters WHERE novel_id = n.id) as chapter_count,
                (SELECT SUM(token_usage) FROM chapters WHERE novel_id = n.id) as total_tokens,
+               (SELECT SUM(word_count) FROM chapters WHERE novel_id = n.id) as total_words,
                (SELECT content FROM outline_versions WHERE novel_id = n.id AND is_active = 1 LIMIT 1) as active_outline
         FROM novels n
       `).all();

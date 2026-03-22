@@ -6,6 +6,7 @@ export interface Novel {
   views: number;
   chapter_count: number;
   total_tokens: number;
+  total_words: number;
   created_at: string;
   active_outline?: string;
   outlines?: OutlineVersion[];
