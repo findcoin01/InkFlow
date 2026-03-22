@@ -19,6 +19,7 @@ export interface Novel {
   relationships?: string; // JSON string
   last_supplement_at?: string;
   token_usage?: number; // For updates
+  token_type?: string; // For updates
 }
 
 export interface OutlineVersion {
