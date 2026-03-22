@@ -471,6 +471,70 @@ export async function generateChapterTitleFromOutline(outline: string, chapterNu
   }
 }
 
+export async function generateNovelDescription(outline: string, config: AIConfig, language: string = 'en', promptTemplate?: string): Promise<{ text: string, tokens: number }> {
+  const params = getParams(config);
+  const langInstruction = language === 'zh' ? "请用中文撰写。" : "Please write in English.";
+  
+  let fullPrompt = `You are a professional novel editor. Based on the following novel outline, write a compelling novel description (summary). The description should be between 80 and 150 words, highlighting the core conflict, main characters, and unique selling points of the story.\n\nOutline:\n${outline}\n\n${langInstruction}`;
+  
+  if (promptTemplate) {
+    fullPrompt = promptTemplate.replace(/{outline}/g, outline).replace(/{langInstruction}/g, langInstruction);
+  }
+
+  if (config.provider === 'gemini' && !config.baseUrl) {
+    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+    try {
+      const response = await ai.models.generateContent({
+        model: config.model || "gemini-3-flash-preview",
+        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+        config: {
+          temperature: params.temperature,
+          topP: params.top_p,
+          topK: params.top_k,
+          maxOutputTokens: 500,
+          systemInstruction: `You are a professional novel editor. ${langInstruction} Write a compelling description that hooks the reader.`,
+        }
+      });
+
+      const text = response.text || "";
+      return {
+        text: text.trim(),
+        tokens: (text.length / 4) + (fullPrompt.length / 4)
+      };
+    } catch (error) {
+      console.error("Gemini Error:", error);
+      throw new Error(formatAIError(error, "Gemini"));
+    }
+  } else {
+    const openai = new OpenAI({
+      apiKey: config.apiKey || "",
+      baseURL: sanitizeBaseUrl(config.baseUrl) || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      dangerouslyAllowBrowser: true
+    });
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: config.model || (config.provider === 'deepseek' ? "deepseek-chat" : "gpt-4o"),
+        messages: [
+          { role: "system", content: `You are a professional novel editor. ${langInstruction} Write a compelling description that hooks the reader.` },
+          { role: "user", content: fullPrompt }
+        ],
+        temperature: params.temperature,
+        max_tokens: 500,
+      });
+
+      const text = response.choices[0]?.message?.content || "";
+      return {
+        text: text.trim(),
+        tokens: response.usage?.total_tokens || (text.length / 4) + (fullPrompt.length / 4)
+      };
+    } catch (error) {
+      console.error("AI Error:", error);
+      throw new Error(formatAIError(error, config.provider));
+    }
+  }
+}
+
 export async function generateChapterSummary(content: string, config: AIConfig, language: string = 'en', promptTemplate?: string): Promise<{ text: string, tokens: number }> {
   const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   const defaultPrompt = `将以下小说章节总结为简明摘要（最多 200 字）。重点关注角色发展、情节推进和世界观细节。${langInstruction}\n\n内容：${content}\n\n任务：仅输出摘要文本。`;

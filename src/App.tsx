@@ -54,7 +54,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatDate } from "./lib/utils";
 import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout, Platform, ScheduledTask, Prompt, OperationLog, AIConfigDetail, TokenLog } from "./types";
-import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, generateChapterTitleFromOutline, extractNovelMetadata, generateChapterSummary, refactorWorldSetting } from "./services/aiService";
+import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, generateChapterTitleFromOutline, extractNovelMetadata, generateChapterSummary, generateNovelDescription, refactorWorldSetting } from "./services/aiService";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { translations, Language } from "./constants";
@@ -899,6 +899,29 @@ export default function App() {
       setToast({ message: t.aiError, type: 'error' });
     } finally {
       setIsGeneratingTitle(false);
+    }
+  };
+
+  const handleGenerateDescription = async () => {
+    if (!selectedNovel) return;
+    const activeOutline = selectedNovel.outlines?.find(o => o.is_active === 1);
+    if (!activeOutline || !activeOutline.content) {
+      setToast({ message: t.outlineContextLabel + " " + t.undefinedContext, type: 'error' });
+      return;
+    }
+    setIsGenerating(true);
+    try {
+      const promptTemplate = getActivePrompt('summary');
+      const { text: description, tokens } = await generateNovelDescription(activeOutline.content, aiConfig, lang, promptTemplate);
+      if (description) {
+        handleSaveNovelDetails({ description });
+        setToast({ message: t.generateDescriptionLabel + " " + t.active, type: 'success' });
+      }
+    } catch (error: any) {
+      console.error("Error generating description:", error);
+      setToast({ message: error.message || "Failed to generate description", type: 'error' });
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -3017,7 +3040,17 @@ export default function App() {
                           </div>
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">{t.novelDescription}</label>
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">{t.novelDescription}</label>
+                            <button 
+                              onClick={handleGenerateDescription}
+                              disabled={isGenerating}
+                              className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase tracking-wider transition-colors disabled:opacity-50"
+                            >
+                              <Sparkles size={12} />
+                              {t.generateDescriptionLabel}
+                            </button>
+                          </div>
                           <textarea 
                             value={selectedNovel.description || ""}
                             onChange={(e) => handleSaveNovelDetails({ description: e.target.value })}
