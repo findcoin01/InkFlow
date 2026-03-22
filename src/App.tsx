@@ -632,8 +632,11 @@ export default function App() {
         if (novel.description) content += `## ${t.novelDescription}\n${novel.description}\n\n`;
         
         chapters.forEach((ch, index) => {
-          content += `### ${t.chapterPrefix}${index + 1}${t.chapterSuffix || ''} ${ch.title}\n\n`;
-          content += `${ch.content}\n\n`;
+          const chapterHeader = `${t.chapterPrefix}${index + 1}${t.chapterSuffix || ''} ${ch.title}`.trim();
+          content += `## ${chapterHeader}\n\n`;
+          // Strip leading # headers from content to avoid double headers or H1 issues
+          const cleanContent = (ch.content || "").trim().replace(/^#+\s+.*\n+/, "").trim();
+          content += `${cleanContent}\n\n`;
         });
 
         const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
@@ -683,7 +686,10 @@ export default function App() {
   <nav epub:type="toc">
     <h1>${novel.title}</h1>
     <ol>
-      ${chapters.map((ch, i) => `<li><a href="ch${i}.xhtml">${ch.title}</a></li>`).join('\n      ')}
+      ${chapters.map((ch, i) => {
+        const chapterTitle = `${t.chapterPrefix}${i + 1}${t.chapterSuffix || ''} ${ch.title}`.trim();
+        return `<li><a href="ch${i}.xhtml">${chapterTitle}</a></li>`;
+      }).join('\n      ')}
     </ol>
   </nav>
 </body>
@@ -691,11 +697,12 @@ export default function App() {
         oebps.file("nav.xhtml", navXhtml);
 
         chapters.forEach((ch, i) => {
-          const chXhtml = `<?xml version="1.0" encoding="UTF-8"?>
+    const chapterTitle = `${t.chapterPrefix}${i + 1}${t.chapterSuffix || ''} ${ch.title}`.trim();
+    const chXhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml">
-<head><title>${ch.title}</title><link rel="stylesheet" type="text/css" href="style.css"/></head>
+<head><title>${chapterTitle}</title><link rel="stylesheet" type="text/css" href="style.css"/></head>
 <body>
-  <h2>${ch.title}</h2>
+  <h2>${chapterTitle}</h2>
   ${(ch.content || "").split('\n').filter(p => p.trim()).map(p => `<p>${p.trim()}</p>`).join('\n  ')}
 </body>
 </html>`;
