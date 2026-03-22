@@ -2232,21 +2232,23 @@ export default function App() {
                         >
                           <Download size={16} />
                         </button>
-                        <div className="absolute right-0 top-full mt-1 w-32 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl hidden group-hover/export:block z-20">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); exportNovel(novel, 'markdown'); }}
-                            className="w-full text-left px-3 py-2 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-2"
-                          >
-                            <FileDown size={12} />
-                            Markdown
-                          </button>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); exportNovel(novel, 'epub'); }}
-                            className="w-full text-left px-3 py-2 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-2"
-                          >
-                            <BookOpen size={12} />
-                            EPUB
-                          </button>
+                        <div className="absolute right-0 top-full pt-1 w-32 hidden group-hover/export:block z-20">
+                          <div className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); exportNovel(novel, 'markdown'); }}
+                              className="w-full text-left px-3 py-2 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-2"
+                            >
+                              <FileDown size={12} />
+                              Markdown
+                            </button>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); exportNovel(novel, 'epub'); }}
+                              className="w-full text-left px-3 py-2 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-2"
+                            >
+                              <BookOpen size={12} />
+                              EPUB
+                            </button>
+                          </div>
                         </div>
                       </div>
                       <button 
@@ -2380,21 +2382,23 @@ export default function App() {
                       <Download size={18} />
                       {t.export}
                     </button>
-                    <div className="absolute right-0 top-full mt-1 w-40 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl hidden group-hover/export:block z-20">
-                      <button 
-                        onClick={() => exportNovel(selectedNovel, 'markdown')}
-                        className="w-full text-left px-4 py-3 text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-3"
-                      >
-                        <FileDown size={16} />
-                        {t.exportMarkdown}
-                      </button>
-                      <button 
-                        onClick={() => exportNovel(selectedNovel, 'epub')}
-                        className="w-full text-left px-4 py-3 text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-3"
-                      >
-                        <BookOpen size={16} />
-                        {t.exportEpub}
-                      </button>
+                    <div className="absolute right-0 top-full pt-1 w-40 hidden group-hover/export:block z-20">
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden">
+                        <button 
+                          onClick={() => exportNovel(selectedNovel, 'markdown')}
+                          className="w-full text-left px-4 py-3 text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-3"
+                        >
+                          <FileDown size={16} />
+                          {t.exportMarkdown}
+                        </button>
+                        <button 
+                          onClick={() => exportNovel(selectedNovel, 'epub')}
+                          className="w-full text-left px-4 py-3 text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-3"
+                        >
+                          <BookOpen size={16} />
+                          {t.exportEpub}
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <button 
