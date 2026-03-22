@@ -17,11 +17,13 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     description TEXT,
+    genre TEXT,
     outline TEXT,
     cover_url TEXT,
     status TEXT DEFAULT 'draft',
     views INTEGER DEFAULT 0,
     target_chapters INTEGER DEFAULT 50,
+    total_tokens INTEGER DEFAULT 0,
     characters TEXT,
     storylines TEXT,
     world_setting TEXT,
@@ -148,6 +150,8 @@ if (!defaultPlatform) {
 // Migration for existing databases
 try { db.prepare("ALTER TABLE novels ADD COLUMN status TEXT DEFAULT 'draft'").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE novels ADD COLUMN target_chapters INTEGER DEFAULT 50").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE novels ADD COLUMN total_tokens INTEGER DEFAULT 0").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE novels ADD COLUMN genre TEXT").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE novels ADD COLUMN characters TEXT").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE novels ADD COLUMN storylines TEXT").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE novels ADD COLUMN world_setting TEXT").run(); } catch (e) {}
@@ -461,14 +465,16 @@ async function startServer() {
 
   // Get all novels with stats
   app.post("/api/token-logs", (req, res) => {
-    const { novel_id, operation_type, tokens } = req.body;
-    if (!novel_id || !operation_type || !tokens) {
-      return res.status(400).json({ error: "novel_id, operation_type, and tokens are required" });
+    const { novel_id, operation_type, tokens, type } = req.body;
+    const finalType = type || operation_type;
+    if (!novel_id || !finalType || !tokens) {
+      return res.status(400).json({ error: "novel_id, type, and tokens are required" });
     }
     try {
       db.prepare(
-        "INSERT INTO token_logs (novel_id, operation_type, tokens) VALUES (?, ?, ?)"
-      ).run(novel_id, operation_type, tokens);
+        "INSERT INTO token_logs (novel_id, type, tokens) VALUES (?, ?, ?)"
+      ).run(novel_id, finalType, tokens);
+      db.prepare("UPDATE novels SET total_tokens = total_tokens + ? WHERE id = ?").run(tokens, novel_id);
       res.status(201).json({ success: true });
     } catch (error) {
       console.error("Failed to log tokens:", error);
@@ -481,7 +487,6 @@ async function startServer() {
       const novels = db.prepare(`
         SELECT n.*, 
                (SELECT COUNT(*) FROM chapters WHERE novel_id = n.id) as chapter_count,
-               (SELECT SUM(token_usage) FROM chapters WHERE novel_id = n.id) as total_tokens,
                (SELECT SUM(word_count) FROM chapters WHERE novel_id = n.id) as total_words,
                (SELECT content FROM outline_versions WHERE novel_id = n.id AND is_active = 1 LIMIT 1) as active_outline
         FROM novels n
@@ -495,8 +500,8 @@ async function startServer() {
 
   app.post("/api/novels", (req, res) => {
     try {
-      const { title, description } = req.body;
-      const info = db.prepare("INSERT INTO novels (title, description) VALUES (?, ?)").run(title, description);
+      const { title, description, genre } = req.body;
+      const info = db.prepare("INSERT INTO novels (title, description, genre) VALUES (?, ?, ?)").run(title, description, genre);
       const novelId = info.lastInsertRowid;
       
       // Create initial outline version
@@ -525,7 +530,7 @@ async function startServer() {
   
   app.patch("/api/novels/:id", (req, res) => {
     try {
-      const { title, description, target_chapters, characters, storylines, world_setting, cover_url, relationships, status, last_supplement_at, token_usage, token_type } = req.body;
+      const { title, description, genre, target_chapters, characters, storylines, world_setting, cover_url, relationships, status, last_supplement_at, token_usage, token_type } = req.body;
       
       const sanitize = (val: any) => {
         if (val === undefined) return null;
@@ -538,6 +543,7 @@ async function startServer() {
       const params = [
         sanitize(title),
         sanitize(description),
+        sanitize(genre),
         target_chapters ?? null,
         sanitize(characters),
         sanitize(storylines),
@@ -554,6 +560,7 @@ async function startServer() {
         UPDATE novels 
         SET title = COALESCE(?, title),
             description = COALESCE(?, description),
+            genre = COALESCE(?, genre),
             target_chapters = COALESCE(?, target_chapters),
             characters = COALESCE(?, characters),
             storylines = COALESCE(?, storylines),
@@ -597,7 +604,8 @@ async function startServer() {
     const { version_name, content, token_usage } = req.body;
     db.prepare("INSERT INTO outline_versions (novel_id, version_name, content, is_active) VALUES (?, ?, ?, 0)").run(req.params.id, version_name, content);
     if (token_usage) {
-      db.prepare("INSERT INTO token_logs (novel_id, operation_type, tokens) VALUES (?, ?, ?)").run(req.params.id, "生成大纲", token_usage);
+      db.prepare("INSERT INTO token_logs (novel_id, tokens, type) VALUES (?, ?, ?)").run(req.params.id, token_usage, "generate_outline");
+      db.prepare("UPDATE novels SET total_tokens = total_tokens + ? WHERE id = ?").run(token_usage, req.params.id);
     }
     logOperation("创建大纲版本", { 小说ID: req.params.id, 版本: version_name });
     res.json({ success: true });
@@ -648,6 +656,7 @@ async function startServer() {
     logOperation("创建章节", { 小说ID: novel_id, 标题: title });
     if (token_usage) {
       db.prepare("INSERT INTO token_logs (novel_id, chapter_id, tokens, type) VALUES (?, ?, ?, ?)").run(novel_id, info.lastInsertRowid, token_usage, 'generation');
+      db.prepare("UPDATE novels SET total_tokens = total_tokens + ? WHERE id = ?").run(token_usage, novel_id);
     }
     
     res.json({ id: info.lastInsertRowid });
@@ -672,8 +681,9 @@ async function startServer() {
 
     logOperation("更新章节", { ID: req.params.id, 标题: title });
     if (token_usage) {
-      const chapter = db.prepare("SELECT novel_id FROM chapters WHERE id = ?").get(req.params.id);
+      const chapter = db.prepare("SELECT novel_id FROM chapters WHERE id = ?").get(req.params.id) as { novel_id: number };
       db.prepare("INSERT INTO token_logs (novel_id, chapter_id, tokens, type) VALUES (?, ?, ?, ?)").run(chapter.novel_id, req.params.id, token_usage, 'editing');
+      db.prepare("UPDATE novels SET total_tokens = total_tokens + ? WHERE id = ?").run(token_usage, chapter.novel_id);
     }
 
     res.json({ success: true });

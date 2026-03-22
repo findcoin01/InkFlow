@@ -2,6 +2,7 @@ export interface Novel {
   id: number;
   title: string;
   description: string;
+  genre?: string;
   status: string;
   views: number;
   chapter_count: number;

@@ -811,7 +811,8 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           title: newNovelTitle, 
-          description: newNovelGenre || t.newNovelDraft
+          genre: newNovelGenre,
+          description: t.newNovelDraft
         }),
       });
       if (!res.ok) throw new Error(t.createError || "Failed to create novel");
@@ -2210,7 +2211,14 @@ export default function App() {
                             )}
                           </div>
                           <div>
-                            <h4 className="font-semibold text-zinc-100 group-hover:text-emerald-400 transition-colors">{novel.title}</h4>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-semibold text-zinc-100 group-hover:text-emerald-400 transition-colors">{novel.title}</h4>
+                              {novel.genre && (
+                                <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 text-[10px] font-bold rounded uppercase tracking-wider">
+                                  {novel.genre}
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs text-zinc-500 mt-1">{novel.chapter_count} {t.chapters} • {novel.total_tokens?.toLocaleString() || 0} {t.tokens}</p>
                             {novel.target_chapters && (
                               <div className="w-32 h-1 bg-zinc-800 rounded-full mt-2 overflow-hidden">
@@ -2292,7 +2300,14 @@ export default function App() {
                         )}
                       </div>
                       <div className="flex-1">
-                        <h3 className="text-xl font-bold text-white group-hover:text-emerald-400 transition-colors">{novel.title}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xl font-bold text-white group-hover:text-emerald-400 transition-colors">{novel.title}</h3>
+                          {novel.genre && (
+                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 text-[10px] font-bold rounded uppercase tracking-wider">
+                              {novel.genre}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-sm text-zinc-500 line-clamp-2 mt-2">{novel.description}</p>
                       </div>
                     </div>
@@ -2954,6 +2969,16 @@ export default function App() {
                             type="text"
                             value={selectedNovel.title || ""}
                             onChange={(e) => handleSaveNovelDetails({ title: e.target.value })}
+                            className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">{t.novelGenreLabel}</label>
+                          <input 
+                            type="text"
+                            value={selectedNovel.genre || ""}
+                            onChange={(e) => handleSaveNovelDetails({ genre: e.target.value })}
+                            placeholder={t.novelGenrePlaceholder}
                             className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-all"
                           />
                         </div>
