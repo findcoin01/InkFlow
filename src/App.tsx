@@ -290,8 +290,35 @@ export default function App() {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const handleSearchContent = () => {
+    if (!contentSearch || !textareaRef.current || !currentChapter?.content) return;
+
+    const content = currentChapter.content.toLowerCase();
+    const query = contentSearch.toLowerCase();
+    let nextIndex = content.indexOf(query, lastSearchIndex + 1);
+
+    if (nextIndex === -1) {
+      // Loop back to start
+      nextIndex = content.indexOf(query);
+    }
+
+    if (nextIndex !== -1) {
+      setLastSearchIndex(nextIndex);
+      const textarea = textareaRef.current;
+      textarea.focus();
+      textarea.setSelectionRange(nextIndex, nextIndex + query.length);
+
+      // Scroll to the selection
+      const lineHeight = 28; // Estimated line height in px
+      const linesBefore = content.substring(0, nextIndex).split('\n').length;
+      textarea.scrollTop = (linesBefore - 5) * lineHeight;
+    }
+  };
+  const [novelSearch, setNovelSearch] = useState("");
   const [novelSearch, setNovelSearch] = useState("");
   const [chapterSearch, setChapterSearch] = useState("");
+  const [contentSearch, setContentSearch] = useState("");
+  const [lastSearchIndex, setLastSearchIndex] = useState(-1);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [promptFilter, setPromptFilter] = useState<string>("all");
   const [selectedTemplates, setSelectedTemplates] = useState<Record<string, number>>({});
@@ -2498,7 +2525,7 @@ export default function App() {
                       />
                     </div>
                     <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-                      {chapters.filter(ch => ch.title.toLowerCase().includes(chapterSearch.toLowerCase())).map(ch => (
+                      {chapters.filter(ch => ch.title.toLowerCase().includes(chapterSearch.toLowerCase())).map((ch, idx) => (
                         <div
                           key={ch.id}
                           onClick={() => setCurrentChapter(ch)}
@@ -2516,10 +2543,14 @@ export default function App() {
                             <span className="truncate font-medium">{ch.title}</span>
                             {ch.status === 'published' && <Clock size={12} className="text-emerald-500" />}
                           </div>
-                          <p className="text-[10px] text-zinc-600 mt-1 flex items-center justify-between">
-                            <span>{ch.word_count} {t.words}</span>
-                            {ch.summary && <span className="text-[9px] text-emerald-500/60 italic truncate ml-2 max-w-[80px]">{ch.summary}</span>}
-                          </p>
+                          <div className="flex items-center justify-between mt-1">
+                            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                              {t.chapterPrefix || "Chapter"} {idx + 1}
+                            </p>
+                            <p className="text-[10px] text-zinc-600">
+                              {ch.word_count} {t.words}
+                            </p>
+                          </div>
                           
                           <button
                             onClick={(e) => handleDeleteChapter(e, ch.id)}
@@ -2621,7 +2652,7 @@ export default function App() {
                             </span>
                           </div>
                         </div>
-                        {(currentChapter.summary || isGenerating) && (
+                        {currentChapter.summary || isGenerating ? (
                           <div className="mx-8 mt-4 p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-xl">
                             <div className="flex items-center justify-between mb-2">
                               <div className="flex items-center gap-2">
@@ -2643,7 +2674,33 @@ export default function App() {
                               rows={2}
                             />
                           </div>
+                        ) : null}
+
+                        {!isMarkdownPreview && (
+                          <div className="mx-8 mt-4 flex items-center gap-2">
+                            <div className="relative flex-1">
+                              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                              <input 
+                                type="text"
+                                value={contentSearch}
+                                onChange={(e) => {
+                                  setContentSearch(e.target.value);
+                                  setLastSearchIndex(-1);
+                                }}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSearchContent()}
+                                placeholder={t.searchContent || "Search content..."}
+                                className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg py-1.5 pl-9 pr-3 text-xs text-zinc-300 focus:outline-none focus:border-emerald-500/30 transition-all"
+                              />
+                            </div>
+                            <button 
+                              onClick={handleSearchContent}
+                              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all"
+                            >
+                              {t.findNext || "Find Next"}
+                            </button>
+                          </div>
                         )}
+
                         {isMarkdownPreview ? (
                           <div className="flex-1 p-8 overflow-y-auto markdown-body">
                             <Markdown remarkPlugins={[remarkGfm]}>
