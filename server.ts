@@ -663,7 +663,7 @@ async function startServer() {
   });
 
   app.patch("/api/chapters/:id", (req, res) => {
-    const { content, title, summary, scheduled_at, token_usage } = req.body;
+    const { content, title, summary, scheduled_at, token_usage, token_type } = req.body;
     
     // Only update word_count if content is provided
     const word_count = content !== undefined ? content.length : undefined;
@@ -682,7 +682,7 @@ async function startServer() {
     logOperation("更新章节", { ID: req.params.id, 标题: title });
     if (token_usage) {
       const chapter = db.prepare("SELECT novel_id FROM chapters WHERE id = ?").get(req.params.id) as { novel_id: number };
-      db.prepare("INSERT INTO token_logs (novel_id, chapter_id, tokens, type) VALUES (?, ?, ?, ?)").run(chapter.novel_id, req.params.id, token_usage, 'editing');
+      db.prepare("INSERT INTO token_logs (novel_id, chapter_id, tokens, type) VALUES (?, ?, ?, ?)").run(chapter.novel_id, req.params.id, token_usage, token_type || 'editing');
       db.prepare("UPDATE novels SET total_tokens = total_tokens + ? WHERE id = ?").run(token_usage, chapter.novel_id);
     }
 

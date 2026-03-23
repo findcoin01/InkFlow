@@ -968,7 +968,7 @@ export default function App() {
         await fetch(`/api/chapters/${currentChapter.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, token_usage: tokens }),
+          body: JSON.stringify({ title, token_usage: tokens, token_type: 'title' }),
         });
         setToast({ message: t.saveSuccess, type: 'success' });
       }
@@ -1224,7 +1224,7 @@ export default function App() {
         const res = await fetch(`/api/chapters/${currentChapter.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ summary, token_usage: tokens }),
+          body: JSON.stringify({ summary, token_usage: tokens, token_type: 'summary' }),
         });
         
         if (!res.ok) throw new Error(t.saveError || "Failed to save summary");
@@ -1267,7 +1267,8 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           content: streamedText,
-          token_usage: Math.round((streamedText.length + prompt.length + context.length) / 4)
+          token_usage: Math.round((streamedText.length + prompt.length + context.length) / 4),
+          token_type: 'polish'
         }),
       });
       
@@ -1320,7 +1321,8 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           content: finalContent,
-          token_usage: Math.round((streamedText.length + prompt.length + context.length) / 4)
+          token_usage: Math.round((streamedText.length + prompt.length + context.length) / 4),
+          token_type: 'generation'
         }),
       });
       
@@ -1396,7 +1398,8 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           content: currentContent,
-          token_usage: Math.round(totalTokens)
+          token_usage: Math.round(totalTokens),
+          token_type: 'generation'
         }),
       });
       fetchStats();
@@ -1506,7 +1509,7 @@ export default function App() {
           await fetch("/api/token-logs", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ novel_id: selectedNovel.id, operation_type: t.generateTitleLabel || "生成标题", tokens: Math.round(titleRes.tokens) }),
+            body: JSON.stringify({ novel_id: selectedNovel.id, operation_type: 'title', tokens: Math.round(titleRes.tokens) }),
           }).catch(console.error);
         }
       }
@@ -3573,6 +3576,9 @@ export default function App() {
                                  log.type === 'description' ? t.typeDescription : 
                                  log.type === 'generate_outline' ? t.typeOutline : 
                                  log.type === 'refactor' ? t.typeRefactor :
+                                 log.type === 'summary' ? t.summary :
+                                 log.type === 'title' ? t.generateTitle :
+                                 log.type === 'novel_update' ? t.novelUpdate :
                                  log.type === 'editing' ? t.polish :
                                  t.polish}
                               </span>
