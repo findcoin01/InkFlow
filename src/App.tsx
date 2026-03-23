@@ -305,13 +305,49 @@ export default function App() {
     if (nextIndex !== -1) {
       setLastSearchIndex(nextIndex);
       const textarea = textareaRef.current;
+      
       textarea.focus();
       textarea.setSelectionRange(nextIndex, nextIndex + query.length);
 
-      // Scroll to the selection
-      const lineHeight = 28; // Estimated line height in px
-      const linesBefore = content.substring(0, nextIndex).split('\n').length;
-      textarea.scrollTop = (linesBefore - 5) * lineHeight;
+      // Create a mirror element to calculate the scroll position accurately
+      const style = window.getComputedStyle(textarea);
+      const mirror = document.createElement('div');
+      
+      // Copy relevant styles for accurate measurement
+      mirror.style.fontFamily = style.fontFamily;
+      mirror.style.fontSize = style.fontSize;
+      mirror.style.fontWeight = style.fontWeight;
+      mirror.style.lineHeight = style.lineHeight;
+      mirror.style.paddingLeft = style.paddingLeft;
+      mirror.style.paddingRight = style.paddingRight;
+      mirror.style.paddingTop = style.paddingTop;
+      mirror.style.paddingBottom = style.paddingBottom;
+      mirror.style.borderWidth = style.borderWidth;
+      mirror.style.boxSizing = style.boxSizing;
+      mirror.style.width = `${textarea.clientWidth}px`;
+      mirror.style.whiteSpace = 'pre-wrap';
+      mirror.style.wordWrap = 'break-word';
+      mirror.style.position = 'absolute';
+      mirror.style.visibility = 'hidden';
+      mirror.style.top = '0';
+      mirror.style.left = '-9999px';
+      
+      // Set content up to the match
+      const textBefore = currentChapter.content.substring(0, nextIndex);
+      mirror.textContent = textBefore;
+      
+      // Add a marker for the match
+      const marker = document.createElement('span');
+      marker.textContent = currentChapter.content.substring(nextIndex, nextIndex + query.length);
+      mirror.appendChild(marker);
+      
+      document.body.appendChild(mirror);
+      const offsetTop = marker.offsetTop;
+      document.body.removeChild(mirror);
+
+      // Scroll the textarea to center the match
+      const containerHeight = textarea.clientHeight;
+      textarea.scrollTop = offsetTop - (containerHeight / 2);
     }
   };
   const [novelSearch, setNovelSearch] = useState("");
