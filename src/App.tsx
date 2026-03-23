@@ -315,7 +315,6 @@ export default function App() {
     }
   };
   const [novelSearch, setNovelSearch] = useState("");
-  const [novelSearch, setNovelSearch] = useState("");
   const [chapterSearch, setChapterSearch] = useState("");
   const [contentSearch, setContentSearch] = useState("");
   const [lastSearchIndex, setLastSearchIndex] = useState(-1);
