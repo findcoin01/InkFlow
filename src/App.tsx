@@ -33,7 +33,8 @@ import {
   Activity,
   Wand2,
   Download,
-  FileDown
+  FileDown,
+  Search
 } from "lucide-react";
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -289,6 +290,8 @@ export default function App() {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [novelSearch, setNovelSearch] = useState("");
+  const [chapterSearch, setChapterSearch] = useState("");
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [promptFilter, setPromptFilter] = useState<string>("all");
   const [selectedTemplates, setSelectedTemplates] = useState<Record<string, number>>({});
@@ -2258,15 +2261,25 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               className="space-y-8"
             >
-              <header className="flex justify-between items-end">
+              <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
                 <div>
                   <h2 className="text-3xl font-bold text-white mb-2">{t.myNovels}</h2>
                   <p className="text-zinc-500">{t.manageEmpire}</p>
                 </div>
+                <div className="relative w-full md:w-64">
+                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input 
+                    type="text"
+                    value={novelSearch}
+                    onChange={(e) => setNovelSearch(e.target.value)}
+                    placeholder={t.searchNovels || "Search novels..."}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 transition-all"
+                  />
+                </div>
               </header>
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {novels.map(novel => (
+                {novels.filter(n => n.title.toLowerCase().includes(novelSearch.toLowerCase()) || n.genre?.toLowerCase().includes(novelSearch.toLowerCase())).map(novel => (
                   <Card key={novel.id} className="group hover:border-emerald-500/50 transition-all cursor-pointer relative" onClick={() => fetchNovelDetails(novel.id)}>
                     <div className="absolute top-4 right-4 flex gap-2 z-10 opacity-0 group-hover:opacity-100 transition-all">
                       <div className="relative group/export">
@@ -2474,8 +2487,18 @@ export default function App() {
                 {/* Chapter List */}
                 <div className="w-64 flex flex-col gap-4">
                   <Card className="flex-1 flex flex-col p-4 overflow-hidden" title={t.chapters}>
+                    <div className="relative mb-4">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                      <input 
+                        type="text"
+                        value={chapterSearch}
+                        onChange={(e) => setChapterSearch(e.target.value)}
+                        placeholder={t.searchChapters || "Search chapters..."}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg py-1.5 pl-9 pr-3 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50 transition-all"
+                      />
+                    </div>
                     <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-                      {chapters.map(ch => (
+                      {chapters.filter(ch => ch.title.toLowerCase().includes(chapterSearch.toLowerCase())).map(ch => (
                         <div
                           key={ch.id}
                           onClick={() => setCurrentChapter(ch)}
