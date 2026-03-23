@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -125,6 +125,65 @@ const StatCard = ({ label, value, icon: Icon, trend, t }: any) => (
     </div>
   </Card>
 );
+
+const ChapterPreview = React.memo(({ ch, idx, t }: { ch: Chapter, idx: number, t: any }) => {
+  const [isVisible, setIsVisible] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '800px' }
+    );
+
+    if (ref.current) {
+      observer.observe(ref.current);
+    }
+
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div 
+      ref={ref} 
+      id={`preview-chapter-${ch.id}`} 
+      className="space-y-8 scroll-mt-24 min-h-[100px]"
+      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 500px' } as any}
+    >
+      <div className="flex items-center gap-4">
+        <div className="h-px flex-1 bg-zinc-800"></div>
+        <h2 className="text-2xl font-bold text-emerald-400">{t.chapterPrefix || "Chapter"} {idx + 1}{t.chapterSuffix || ""}：{ch.title}</h2>
+        <div className="h-px flex-1 bg-zinc-800"></div>
+      </div>
+      <div className="text-zinc-300 text-lg leading-loose whitespace-pre-wrap font-serif markdown-body">
+        {isVisible ? (
+          <Markdown remarkPlugins={[remarkGfm]}>
+            {ch.content || t.noContent}
+          </Markdown>
+        ) : (
+          <div className="h-40 flex items-center justify-center text-zinc-800 border border-dashed border-zinc-800 rounded-xl">
+            <RefreshCw className="animate-spin opacity-20" size={24} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+const TOCItem = React.memo(({ ch, idx, onScrollTo }: { ch: Chapter, idx: number, onScrollTo: (id: number) => void }) => (
+  <button
+    onClick={() => onScrollTo(ch.id)}
+    className="w-full text-left px-3 py-2 rounded-lg text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-all truncate"
+  >
+    <span className="text-zinc-600 mr-2">{idx + 1}.</span>
+    {ch.title}
+  </button>
+));
 
 const StructuredContent = ({ content, placeholder }: { content: string, placeholder: string }) => {
   if (!content) return <p className="text-zinc-500 italic text-sm">{placeholder}</p>;
@@ -2142,17 +2201,15 @@ export default function App() {
                   <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4 px-2">{t.tableOfContents}</h4>
                   <div className="space-y-1">
                     {chapters.map((ch, idx) => (
-                      <button
-                        key={ch.id}
-                        onClick={() => {
-                          const element = document.getElementById(`preview-chapter-${ch.id}`);
+                      <TOCItem 
+                        key={ch.id} 
+                        ch={ch} 
+                        idx={idx} 
+                        onScrollTo={(id) => {
+                          const element = document.getElementById(`preview-chapter-${id}`);
                           element?.scrollIntoView({ behavior: 'smooth' });
-                        }}
-                        className="w-full text-left px-3 py-2 rounded-lg text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-all truncate"
-                      >
-                        <span className="text-zinc-600 mr-2">{idx + 1}.</span>
-                        {ch.title}
-                      </button>
+                        }} 
+                      />
                     ))}
                   </div>
                 </div>
@@ -2172,18 +2229,7 @@ export default function App() {
                     
                     <div className="space-y-24">
                       {chapters.map((ch, idx) => (
-                        <div key={ch.id} id={`preview-chapter-${ch.id}`} className="space-y-8 scroll-mt-24">
-                          <div className="flex items-center gap-4">
-                            <div className="h-px flex-1 bg-zinc-800"></div>
-                            <h2 className="text-2xl font-bold text-emerald-400">{t.chapterPrefix || "Chapter"} {idx + 1}{t.chapterSuffix || ""}：{ch.title}</h2>
-                            <div className="h-px flex-1 bg-zinc-800"></div>
-                          </div>
-                          <div className="text-zinc-300 text-lg leading-loose whitespace-pre-wrap font-serif markdown-body">
-                            <Markdown remarkPlugins={[remarkGfm]}>
-                              {ch.content || t.noContent}
-                            </Markdown>
-                          </div>
-                        </div>
+                        <ChapterPreview key={ch.id} ch={ch} idx={idx} t={t} />
                       ))}
                     </div>
                   </div>
