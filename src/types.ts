@@ -1,6 +1,7 @@
 export interface Novel {
   id: number;
   title: string;
+  author?: string;
   description: string;
   genre?: string;
   status: string;
@@ -67,6 +68,7 @@ export interface AIConfig {
 export type ContentLayout = 'standard' | 'web' | 'traditional';
 
 export interface WritingConfig {
+  defaultAuthor?: string;
   minWords: number;
   maxWords: number;
   layout: ContentLayout;

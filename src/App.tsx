@@ -23,6 +23,7 @@ import {
   Layers,
   Square,
   Users,
+  User,
   GitBranch,
   Network,
   Globe,
@@ -411,6 +412,7 @@ export default function App() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [promptToDelete, setPromptToDelete] = useState<number | null>(null);
   const [newNovelTitle, setNewNovelTitle] = useState("");
+  const [newNovelAuthor, setNewNovelAuthor] = useState("");
   const [newNovelGenre, setNewNovelGenre] = useState("");
 
   const [isSaving, setIsSaving] = useState(false);
@@ -454,6 +456,7 @@ export default function App() {
       } catch (e) {}
     }
     return {
+      defaultAuthor: "",
       minWords: 1000,
       maxWords: 2000,
       layout: 'standard',
@@ -887,6 +890,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           title: newNovelTitle, 
+          author: newNovelAuthor || writingConfig.defaultAuthor,
           genre: newNovelGenre,
           description: t.newNovelDraft
         }),
@@ -894,6 +898,7 @@ export default function App() {
       if (!res.ok) throw new Error(t.createError || "Failed to create novel");
       const data = await res.json();
       setNewNovelTitle("");
+      setNewNovelAuthor("");
       setNewNovelGenre("");
       setShowCreateModal(false);
       await fetchNovels();
@@ -1798,7 +1803,12 @@ export default function App() {
             </div>
           )}
           <button 
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => {
+              setNewNovelTitle("");
+              setNewNovelAuthor(writingConfig.defaultAuthor || "");
+              setNewNovelGenre("");
+              setShowCreateModal(true);
+            }}
             className={cn(
               "w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl flex items-center justify-center gap-2 transition-all",
               isSidebarCollapsed && "p-0 h-12 w-12 mx-auto"
@@ -1834,6 +1844,15 @@ export default function App() {
                   />
                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-2">{t.author}</label>
+                  <input 
+                    value={newNovelAuthor || ""}
+                    onChange={(e) => setNewNovelAuthor(e.target.value)}
+                    placeholder={t.authorPlaceholder}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                  />
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-2">{t.novelGenreLabel}</label>
                   <input 
                     value={newNovelGenre || ""}
@@ -1844,7 +1863,12 @@ export default function App() {
                 </div>
                 <div className="flex gap-3 pt-4">
                   <button 
-                    onClick={() => setShowCreateModal(false)}
+                    onClick={() => {
+                      setShowCreateModal(false);
+                      setNewNovelTitle("");
+                      setNewNovelAuthor("");
+                      setNewNovelGenre("");
+                    }}
                     className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
                   >
                     {t.cancel}
@@ -2137,6 +2161,9 @@ export default function App() {
                 <div className="flex-1 overflow-y-auto p-12 bg-zinc-950 scroll-smooth">
                   <div className="max-w-2xl mx-auto">
                     <h1 className="text-5xl font-bold text-white text-center mb-4">{selectedNovel.title}</h1>
+                    {selectedNovel.author && (
+                      <p className="text-xl text-zinc-400 text-center mb-8 italic">By {selectedNovel.author}</p>
+                    )}
                     <div className="text-zinc-500 text-center italic mb-12 markdown-body">
                       <Markdown remarkPlugins={[remarkGfm]}>
                         {selectedNovel.description || ""}
@@ -2398,6 +2425,12 @@ export default function App() {
                             </span>
                           )}
                         </div>
+                        {novel.author && (
+                          <p className="text-xs text-zinc-400 mt-0.5 flex items-center gap-1">
+                            <User size={10} className="text-zinc-500" />
+                            {novel.author}
+                          </p>
+                        )}
                         <p className="text-sm text-zinc-500 line-clamp-2 mt-2">{novel.description}</p>
                       </div>
                     </div>
@@ -2469,6 +2502,12 @@ export default function App() {
                   <div>
                     <h2 className="text-2xl font-bold text-white">{selectedNovel.title}</h2>
                     <div className="flex items-center gap-4 mt-1">
+                      {selectedNovel.author && (
+                        <span className="text-xs text-zinc-500 flex items-center gap-1">
+                          <User size={10} />
+                          {selectedNovel.author}
+                        </span>
+                      )}
                       <button 
                         onClick={() => setActiveTab("editor")}
                         className={cn("text-xs font-bold uppercase tracking-wider transition-all", activeTab === "editor" ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300")}
@@ -3099,6 +3138,16 @@ export default function App() {
                             type="text"
                             value={selectedNovel.title || ""}
                             onChange={(e) => handleSaveNovelDetails({ title: e.target.value })}
+                            className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">{t.author}</label>
+                          <input 
+                            type="text"
+                            value={selectedNovel.author || ""}
+                            onChange={(e) => handleSaveNovelDetails({ author: e.target.value })}
+                            placeholder={t.authorPlaceholder}
                             className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 transition-all"
                           />
                         </div>
@@ -4193,6 +4242,17 @@ export default function App() {
 
               <Card>
                 <div className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-zinc-400">{t.author}</label>
+                    <input
+                      type="text"
+                      value={writingConfig.defaultAuthor || ""}
+                      onChange={(e) => setWritingConfig({ ...writingConfig, defaultAuthor: e.target.value })}
+                      placeholder={t.authorPlaceholder}
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
+                    />
+                  </div>
+
                   <div className="space-y-4">
                     <label className="text-sm font-medium text-zinc-400">{t.wordCountRange}</label>
                     <div className="grid grid-cols-2 gap-4">

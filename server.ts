@@ -16,6 +16,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS novels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
+    author TEXT,
     description TEXT,
     genre TEXT,
     outline TEXT,
@@ -57,6 +58,12 @@ try {
 
 try {
   db.exec("ALTER TABLE novels ADD COLUMN last_supplement_at DATETIME");
+} catch (e) {
+  // Column likely already exists
+}
+
+try {
+  db.exec("ALTER TABLE novels ADD COLUMN author TEXT");
 } catch (e) {
   // Column likely already exists
 }
