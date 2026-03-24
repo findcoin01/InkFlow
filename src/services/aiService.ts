@@ -55,7 +55,9 @@ export async function generateAIContent(
   writingConfig: WritingConfig,
   language: string = 'en',
   signal?: AbortSignal,
-  promptTemplate?: string
+  promptTemplate?: string,
+  existingContent?: string,
+  nextChapterContext?: string
 ) {
   const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   
@@ -74,6 +76,16 @@ export async function generateAIContent(
 
   let fullPrompt = `你是一位创意小说作家。${langInstruction}\n\n${layoutInstruction}\n${wordCountInstruction}\n\n背景上下文：${context}\n\n任务：${prompt}`;
   
+  if (existingContent) {
+    fullPrompt += `\n\n当前章节已写内容（最后部分）：\n${existingContent.slice(-1500)}\n\n重要指令：\n1. 检查上述内容的最后一句是否完整。如果不完整，请先补完该句子，然后继续创作。\n2. 确保新内容与已有内容无缝衔接，不要重复已有内容。`;
+  }
+
+  if (nextChapterContext) {
+    fullPrompt += `\n\n下一章大纲/背景：\n${nextChapterContext}\n\n重要指令：\n请知晓下一章的内容，以便在本章结尾处做好铺垫或在合适的地方停下，确保章节间的连贯性。`;
+  }
+
+  fullPrompt += "\n\n重要提示：仅输出小说正文内容。不要使用 JSON。不要包含标题或元对话。";
+
   if (promptTemplate) {
     fullPrompt = promptTemplate
       .replace(/{context}/g, context)
@@ -84,6 +96,15 @@ export async function generateAIContent(
       .replace(/{layoutInstruction}/g, layoutInstruction)
       .replace(/{wordCountInstruction}/g, wordCountInstruction);
     
+    if (existingContent) {
+      fullPrompt = `当前章节已写内容（最后部分）：\n${existingContent.slice(-1500)}\n\n${fullPrompt}`;
+      fullPrompt += `\n\n指令：检查上述内容的最后一句是否完整。如果不完整，请先补完该句子，然后继续创作。`;
+    }
+
+    if (nextChapterContext) {
+      fullPrompt += `\n\n下一章背景：${nextChapterContext}\n指令：参考下一章内容以保证连贯性。`;
+    }
+
     // If context or task were not in the template, append them to ensure AI has the information
     if (!fullPrompt.includes(context)) {
       fullPrompt = `背景上下文：${context}\n\n${fullPrompt}`;
@@ -91,16 +112,20 @@ export async function generateAIContent(
     if (!fullPrompt.includes(prompt)) {
       fullPrompt = `${fullPrompt}\n\n任务：${prompt}`;
     }
+
+    fullPrompt += "\n\n重要提示：仅输出小说正文内容。不要使用 JSON。不要包含标题或元对话。";
   }
 
-  const params = getParams(config);
+  const normalizedConfig = getNormalizedConfig(config);
+  const params = getParams(normalizedConfig);
 
-  if (config.provider === 'gemini' && !config.baseUrl) {
-    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+  if (normalizedConfig.provider === 'gemini' && !normalizedConfig.baseUrl) {
+    const ai = new GoogleGenAI({ apiKey: normalizedConfig.apiKey || process.env.GEMINI_API_KEY || "" });
     const systemInstruction = `你是一位创意小说作家。${layoutInstruction} ${langInstruction} 
     严格规则：以 JSON 格式返回响应，包含 'title' 和 'content' 键。
     仅输出小说内容。不要包含元对话、章节摘要或诸如“这是第X章”或“故事继续”之类的结束语。
-    如果是接着之前的文本创作，请从上次停止的地方开始，不要重复任何内容。`;
+    如果是接着之前的文本创作，请检查最后一句是否完整并补完，然后从上次停止的地方开始，不要重复任何内容。
+    参考下一章内容以确保连贯性。`;
 
     try {
       const response = await ai.models.generateContent({
@@ -190,7 +215,9 @@ export async function* generateAIContentStream(
   writingConfig: WritingConfig,
   language: string = 'en',
   signal?: AbortSignal,
-  promptTemplate?: string
+  promptTemplate?: string,
+  existingContent?: string,
+  nextChapterContext?: string
 ) {
   const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   
@@ -207,7 +234,17 @@ export async function* generateAIContentStream(
     ? `内容长度应在 ${writingConfig.minWords} 到 ${writingConfig.maxWords} 字之间。`
     : "如果没有特别说明，请遵循大纲中的长度要求。否则，请撰写标准长度的章节。";
   
-  let fullPrompt = `你是一位创意小说作家。${langInstruction}\n\n${layoutInstruction}\n${wordCountInstruction}\n\n背景上下文：${context}\n\n任务：${prompt}\n\n重要提示：仅输出小说正文内容。不要使用 JSON。不要包含标题或元对话。`;
+  let fullPrompt = `你是一位创意小说作家。${langInstruction}\n\n${layoutInstruction}\n${wordCountInstruction}\n\n背景上下文：${context}\n\n任务：${prompt}\n\n`;
+
+  if (existingContent) {
+    fullPrompt += `\n当前章节已写内容（最后部分）：\n${existingContent.slice(-1500)}\n\n重要指令：\n1. 检查上述内容的最后一句是否完整。如果不完整，请先补完该句子，然后继续创作。\n2. 确保新内容与已有内容无缝衔接，不要重复已有内容。`;
+  }
+
+  if (nextChapterContext) {
+    fullPrompt += `\n\n下一章大纲/背景：\n${nextChapterContext}\n\n重要指令：\n请知晓下一章的内容，以便在本章结尾处做好铺垫或在合适的地方停下，确保章节间的连贯性。`;
+  }
+
+  fullPrompt += "\n\n重要提示：仅输出小说正文内容。不要使用 JSON。不要包含标题或元对话。";
   
   if (promptTemplate) {
     fullPrompt = promptTemplate
@@ -219,6 +256,15 @@ export async function* generateAIContentStream(
       .replace(/{layoutInstruction}/g, layoutInstruction)
       .replace(/{wordCountInstruction}/g, wordCountInstruction);
     
+    if (existingContent) {
+      fullPrompt = `当前章节已写内容（最后部分）：\n${existingContent.slice(-1500)}\n\n${fullPrompt}`;
+      fullPrompt += `\n\n指令：检查上述内容的最后一句是否完整。如果不完整，请先补完该句子，然后继续创作。`;
+    }
+
+    if (nextChapterContext) {
+      fullPrompt += `\n\n下一章背景：${nextChapterContext}\n指令：参考下一章内容以保证连贯性。`;
+    }
+
     // If context or task were not in the template, append them to ensure AI has the information
     if (!fullPrompt.includes(context)) {
       fullPrompt = `背景上下文：${context}\n\n${fullPrompt}`;
@@ -237,7 +283,8 @@ export async function* generateAIContentStream(
     const ai = new GoogleGenAI({ apiKey: normalizedConfig.apiKey || process.env.GEMINI_API_KEY || "" });
     const systemInstruction = `你是一位创意小说作家。${layoutInstruction} ${langInstruction} 
     严格规则：仅输出小说内容。不要包含元对话、章节摘要或结束语。
-    如果是接着之前的文本创作，请从上次停止的地方开始，不要重复任何内容。`;
+    如果是接着之前的文本创作，请检查最后一句是否完整并补完，然后从上次停止的地方开始，不要重复任何内容。
+    参考下一章内容以确保连贯性。`;
 
     try {
       const response = await ai.models.generateContentStream({

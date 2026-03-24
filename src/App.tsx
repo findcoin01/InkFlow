@@ -1382,9 +1382,18 @@ export default function App() {
       const prompt = `${layoutContext}\n\n${t.continueWritingPrompt.replace('{title}', currentChapter.title)}${currentContent.slice(-800)}`;
       const context = `${t.novelTitleContext}: ${selectedNovel.title}\n${t.outlineContextLabel}: ${activeOutlineContent}`;
       
+      const currentIndex = chapters.findIndex(c => c.id === currentChapter.id);
+      const nextChapter = currentIndex !== -1 && currentIndex < chapters.length - 1 ? chapters[currentIndex + 1] : null;
+      
+      let nextChapterContext = "";
+      if (nextChapter) {
+        const nextChapterOutline = getChapterOutlineFromOutline(activeOutlineContent, currentIndex + 2);
+        nextChapterContext = nextChapterOutline ? `下一章大纲：\n${nextChapterOutline}` : `下一章标题：${nextChapter.title}\n下一章摘要：${nextChapter.summary || "无"}`;
+      }
+
       let streamedText = "";
       const promptTemplate = getActivePrompt('chapter');
-      const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate);
+      const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate, currentContent, nextChapterContext);
       
       for await (const chunk of stream) {
         if (controller.signal.aborted) break;
@@ -1450,9 +1459,18 @@ export default function App() {
         ${t.contextBackground}：${currentContent.slice(-1000)}`;
         const context = `${t.novelTitleContext}: ${selectedNovel.title}\n${t.outlineContextLabel}: ${activeOutlineContent}`;
         
+        const currentIndex = chapters.findIndex(c => c.id === currentChapter.id);
+        const nextChapter = currentIndex !== -1 && currentIndex < chapters.length - 1 ? chapters[currentIndex + 1] : null;
+        
+        let nextChapterContext = "";
+        if (nextChapter) {
+          const nextChapterOutline = getChapterOutlineFromOutline(activeOutlineContent, currentIndex + 2);
+          nextChapterContext = nextChapterOutline ? `下一章大纲：\n${nextChapterOutline}` : `下一章标题：${nextChapter.title}\n下一章摘要：${nextChapter.summary || "无"}`;
+        }
+
         let streamedText = "";
         const promptTemplate = getActivePrompt('chapter');
-        const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate);
+        const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate, currentContent, nextChapterContext);
         
         for await (const chunk of stream) {
           if (controller.signal.aborted) break;
@@ -1539,6 +1557,42 @@ export default function App() {
       }
     }
     return "";
+  };
+
+  const getChapterOutlineFromOutline = (outlineContent: string, chapterNum: number) => {
+    if (!outlineContent) return "";
+    const lines = outlineContent.split('\n');
+    let found = false;
+    let result = "";
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const isCurrentChapter = getChapterTitleFromOutline(line, chapterNum);
+      const isNextChapter = getChapterTitleFromOutline(line, chapterNum + 1);
+      
+      if (isCurrentChapter) {
+        found = true;
+        result += line + "\n";
+        continue;
+      }
+      
+      if (found && isNextChapter) {
+        break;
+      }
+      
+      if (found) {
+        // Check if this line looks like ANY chapter header to avoid over-consuming
+        const anyChapterMatch = line.match(/^(?:Chapter|第)?\s*\d+/i);
+        if (anyChapterMatch && !isCurrentChapter) {
+           // If we hit another chapter header that isn't the current one, stop
+           break;
+        }
+        result += line + "\n";
+      }
+    }
+    return result.trim();
   };
 
   const handleAIGenerateOutline = async () => {
@@ -1706,10 +1760,13 @@ export default function App() {
         
         const context = `${t.novelTitleContext}: ${selectedNovel.title}\n${t.descriptionContextLabel}: ${selectedNovel.description}\n${t.targetChaptersContextLabel}: ${targetChapters}\n${t.outlineContextLabel}: ${activeOutlineContent}\n${t.charactersContextLabel}: ${selectedNovel.characters || t.undefinedContext}\n${t.worldSettingContextLabel}: ${selectedNovel.world_setting || t.undefinedContext}\n${t.contextBackground}: ${currentChapters.slice(-2).map((c: any) => c.title + ": " + (c.content || "").slice(-500)).join("\n")}`;
         
+        const nextChapterOutline = getChapterOutlineFromOutline(activeOutlineContent, nextChapterNum + 1);
+        const nextChapterContext = nextChapterOutline ? `下一章大纲：\n${nextChapterOutline}` : "";
+
         let fullContent = "";
         
         const promptTemplate = getActivePrompt('chapter');
-        const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate);
+        const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate, "", nextChapterContext);
         
         for await (const chunk of stream) {
           if (controller.signal.aborted) break;
