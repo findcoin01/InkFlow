@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import OpenAI from "openai";
 import { AIConfig, WritingConfig, Chapter } from "../types";
+import { LangChainService } from "./langchainService";
 
 function formatAIError(error: any, provider: string): string {
   const message = error.message || String(error);
@@ -219,126 +220,25 @@ export async function* generateAIContentStream(
   existingContent?: string,
   nextChapterContext?: string
 ) {
-  const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
-  
-  let layoutInstruction = "";
-  if (writingConfig.layout === 'web') {
-    layoutInstruction = "严格排版规则：使用网络小说风格。这意味着段落非常短（通常只有1-2句话），频繁换行，并包含大量对话。务必避免长篇大论。";
-  } else if (writingConfig.layout === 'traditional') {
-    layoutInstruction = "严格排版规则：使用传统文学风格。这意味着段落较长且具有描述性，语气正式，词汇丰富。使用标准段落结构。";
-  } else {
-    layoutInstruction = "使用标准小说格式，段落长度均衡，叙述流畅。";
-  }
-
-  const wordCountInstruction = writingConfig.enforceWordCount 
-    ? `内容长度应在 ${writingConfig.minWords} 到 ${writingConfig.maxWords} 字之间。`
-    : "如果没有特别说明，请遵循大纲中的长度要求。否则，请撰写标准长度的章节。";
-  
-  let fullPrompt = `你是一位创意小说作家。${langInstruction}\n\n${layoutInstruction}\n${wordCountInstruction}\n\n背景上下文：${context}\n\n任务：${prompt}\n\n`;
-
-  if (existingContent) {
-    fullPrompt += `\n当前章节已写内容（最后部分）：\n${existingContent.slice(-1500)}\n\n重要指令：\n1. 检查上述内容的最后一句是否完整。如果不完整，请先补完该句子，然后继续创作。\n2. 确保新内容与已有内容无缝衔接，不要重复已有内容。`;
-  }
-
-  if (nextChapterContext) {
-    fullPrompt += `\n\n下一章大纲/背景：\n${nextChapterContext}\n\n重要指令：\n请知晓下一章的内容，以便在本章结尾处做好铺垫或在合适的地方停下，确保章节间的连贯性。`;
-  }
-
-  fullPrompt += "\n\n重要提示：仅输出小说正文内容。不要使用 JSON。不要包含标题或元对话。";
-  
-  if (promptTemplate) {
-    fullPrompt = promptTemplate
-      .replace(/{context}/g, context)
-      .replace(/{content}/g, context) // Support both
-      .replace(/{task}/g, prompt)
-      .replace(/{prompt}/g, prompt) // Support both
-      .replace(/{langInstruction}/g, langInstruction)
-      .replace(/{layoutInstruction}/g, layoutInstruction)
-      .replace(/{wordCountInstruction}/g, wordCountInstruction);
+  try {
+    const stream = LangChainService.generateChapterStream(
+      prompt,
+      context,
+      config,
+      writingConfig,
+      language,
+      signal,
+      existingContent,
+      nextChapterContext
+    );
     
-    if (existingContent) {
-      fullPrompt = `当前章节已写内容（最后部分）：\n${existingContent.slice(-1500)}\n\n${fullPrompt}`;
-      fullPrompt += `\n\n指令：检查上述内容的最后一句是否完整。如果不完整，请先补完该句子，然后继续创作。`;
+    for await (const chunk of stream) {
+      yield chunk;
     }
-
-    if (nextChapterContext) {
-      fullPrompt += `\n\n下一章背景：${nextChapterContext}\n指令：参考下一章内容以保证连贯性。`;
-    }
-
-    // If context or task were not in the template, append them to ensure AI has the information
-    if (!fullPrompt.includes(context)) {
-      fullPrompt = `背景上下文：${context}\n\n${fullPrompt}`;
-    }
-    if (!fullPrompt.includes(prompt)) {
-      fullPrompt = `${fullPrompt}\n\n任务：${prompt}`;
-    }
-    
-    fullPrompt += "\n\n重要提示：仅输出小说正文内容。不要使用 JSON。不要包含标题或元对话。";
-  }
-
-  const normalizedConfig = getNormalizedConfig(config);
-  const params = getParams(normalizedConfig);
-
-  if (normalizedConfig.provider === 'gemini' && !normalizedConfig.baseUrl) {
-    const ai = new GoogleGenAI({ apiKey: normalizedConfig.apiKey || process.env.GEMINI_API_KEY || "" });
-    const systemInstruction = `你是一位创意小说作家。${layoutInstruction} ${langInstruction} 
-    严格规则：仅输出小说内容。不要包含元对话、章节摘要或结束语。
-    如果是接着之前的文本创作，请检查最后一句是否完整并补完，然后从上次停止的地方开始，不要重复任何内容。
-    参考下一章内容以确保连贯性。`;
-
-    try {
-      const response = await ai.models.generateContentStream({
-        model: normalizedConfig.model || "gemini-3-flash-preview",
-        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
-        config: {
-          temperature: params.temperature,
-          topP: params.top_p,
-          topK: params.top_k,
-          maxOutputTokens: params.max_tokens,
-          systemInstruction: systemInstruction,
-        }
-      });
-
-      for await (const chunk of response) {
-        if (signal?.aborted) break;
-        if (chunk.text) {
-          yield chunk.text;
-        }
-      }
-    } catch (error) {
-      console.error("Gemini Stream Error:", error);
-      throw new Error(formatAIError(error, "Gemini"));
-    }
-  } else {
-    const openai = new OpenAI({
-      apiKey: normalizedConfig.apiKey || "",
-      baseURL: sanitizeBaseUrl(normalizedConfig.baseUrl) || (normalizedConfig.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
-      dangerouslyAllowBrowser: true
-    });
-
-    try {
-      const stream = await openai.chat.completions.create({
-        model: normalizedConfig.model || (normalizedConfig.provider === 'openai' ? "gpt-4o" : (normalizedConfig.provider === 'deepseek' ? "deepseek-chat" : (normalizedConfig.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
-        messages: [
-          { role: "system", content: `你是一位创意小说作家。${layoutInstruction} ${langInstruction} 仅输出小说正文内容。` },
-          { role: "user", content: fullPrompt }
-        ],
-        temperature: params.temperature,
-        top_p: params.top_p,
-        max_tokens: params.max_tokens,
-        stream: true,
-      }, { signal });
-
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || "";
-        if (content) {
-          yield content;
-        }
-      }
-    } catch (error) {
-      console.error(`${normalizedConfig.provider} Stream Error:`, error);
-      throw new Error(formatAIError(error, normalizedConfig.provider));
-    }
+  } catch (error: any) {
+    if (error.name === 'AbortError') throw error;
+    const normalizedConfig = getNormalizedConfig(config);
+    throw new Error(formatAIError(error, normalizedConfig.provider));
   }
 }
 

@@ -61,10 +61,11 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { translations, Language } from "./constants";
 import Logo from "./components/Logo";
+import PlotAssistant from "./components/PlotAssistant";
 
 // --- Components ---
 
-const SidebarItem = ({ icon: Icon, label, active, onClick, collapsed }: any) => (
+const SidebarItem = ({ icon: Icon, label, active, onClick, collapsed, className }: any) => (
   <button
     onClick={onClick}
     title={collapsed ? label : ""}
@@ -73,7 +74,8 @@ const SidebarItem = ({ icon: Icon, label, active, onClick, collapsed }: any) => 
       active 
         ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
         : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200",
-      collapsed && "justify-center px-0"
+      collapsed && "justify-center px-0",
+      className
     )}
   >
     <Icon size={20} className="shrink-0" />
@@ -427,6 +429,7 @@ export default function App() {
   const [isTesting, setIsTesting] = useState(false);
 
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [isPlotAssistantOpen, setIsPlotAssistantOpen] = useState(false);
   const [novels, setNovels] = useState<Novel[]>([]);
   const [stats, setStats] = useState<TokenStats | null>(null);
   const [tokenLogs, setTokenLogs] = useState<TokenLog[]>([]);
@@ -1896,6 +1899,16 @@ export default function App() {
             onClick={() => setActiveTab("ai-config")} 
             collapsed={isSidebarCollapsed}
           />
+          {selectedNovel && (
+            <SidebarItem 
+              icon={Sparkles} 
+              label={t.plotAssistant || "Plot Assistant"} 
+              active={isPlotAssistantOpen} 
+              onClick={() => setIsPlotAssistantOpen(true)} 
+              collapsed={isSidebarCollapsed}
+              className="text-emerald-400"
+            />
+          )}
           <SidebarItem 
             icon={Settings} 
             label={t.settings} 
@@ -2643,6 +2656,13 @@ export default function App() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => setIsPlotAssistantOpen(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/20 transition-all group"
+                  >
+                    <Sparkles size={18} className="group-hover:scale-110 transition-transform" />
+                    <span className="text-sm font-bold">{t.plotAssistant || "Plot Assistant"}</span>
+                  </button>
                   <div className="hidden md:flex flex-col items-end mr-4">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">{t.progress}:</span>
@@ -4827,6 +4847,17 @@ export default function App() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isPlotAssistantOpen && selectedNovel && (
+          <PlotAssistant 
+            novel={selectedNovel} 
+            aiConfig={aiConfig}
+            language={lang}
+            onClose={() => setIsPlotAssistantOpen(false)} 
+          />
         )}
       </AnimatePresence>
 

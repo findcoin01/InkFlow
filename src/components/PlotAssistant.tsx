@@ -1,0 +1,167 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Send, Bot, User, Loader2, Sparkles, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { LangChainService } from '../services/langchainService';
+import { AIConfig, Novel } from '../types';
+
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+interface PlotAssistantProps {
+  novel: Novel;
+  aiConfig: AIConfig;
+  onClose: () => void;
+  language: string;
+}
+
+export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, onClose, language }) => {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
+
+    const userMsg = input.trim();
+    setInput('');
+    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    setIsLoading(true);
+
+    try {
+      const context = `书名：${novel.title}\n简介：${novel.description}\n大纲：${novel.outlines?.find(o => o.is_active === 1)?.content || "无"}\n角色：${novel.characters || "无"}\n世界观：${novel.world_setting || "无"}`;
+      
+      const response = await LangChainService.chatWithMemory(
+        userMsg,
+        novel.id.toString(),
+        context,
+        aiConfig,
+        language
+      );
+
+      setMessages(prev => [...prev, { role: 'assistant', content: response }]);
+    } catch (error) {
+      console.error("Plot Assistant Error:", error);
+      setMessages(prev => [...prev, { role: 'assistant', content: "抱歉，我遇到了一些问题，请稍后再试。" }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 20 }}
+      className="flex flex-col h-full bg-zinc-900 border-l border-zinc-800 shadow-2xl w-80 md:w-96"
+    >
+      <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50 backdrop-blur-md">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400">
+            <Sparkles size={18} />
+          </div>
+          <div>
+            <h3 className="font-bold text-zinc-100">{language === 'zh' ? '情节助手' : 'Plot Assistant'}</h3>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">LangChain AI</p>
+          </div>
+        </div>
+        <button 
+          onClick={onClose}
+          className="w-8 h-8 rounded-full hover:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:text-white transition-colors"
+        >
+          <X size={20} />
+        </button>
+      </div>
+
+      <div 
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar"
+      >
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full text-center space-y-4 px-6">
+            <div className="w-16 h-16 rounded-2xl bg-zinc-800 flex items-center justify-center text-emerald-400 mb-2">
+              <Bot size={32} />
+            </div>
+            <p className="text-sm text-zinc-400 leading-relaxed">
+              {language === 'zh' 
+                ? "我是你的情节助手。你可以问我关于角色发展、情节漏洞或灵感建议。" 
+                : "I am your plot assistant. You can ask me about character development, plot holes, or inspiration suggestions."}
+            </p>
+          </div>
+        )}
+        
+        <AnimatePresence initial={false}>
+          {messages.map((msg, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div className={`flex gap-3 max-w-[90%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                <div className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center ${
+                  msg.role === 'user' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-zinc-800 text-zinc-400'
+                }`}>
+                  {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
+                </div>
+                <div className={`p-4 rounded-2xl text-sm leading-relaxed ${
+                  msg.role === 'user' 
+                    ? 'bg-emerald-500 text-black font-medium rounded-tr-none' 
+                    : 'bg-zinc-800 text-zinc-200 border border-zinc-700/50 rounded-tl-none'
+                }`}>
+                  {msg.content}
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+        
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="flex gap-3 items-center text-zinc-500 text-xs font-medium">
+              <div className="w-8 h-8 rounded-xl bg-zinc-800 flex items-center justify-center">
+                <Loader2 size={16} className="animate-spin" />
+              </div>
+              {language === 'zh' ? "正在思考..." : "Thinking..."}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 bg-zinc-900/80 backdrop-blur-md border-t border-zinc-800">
+        <div className="relative group">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder={language === 'zh' ? "输入你的问题..." : "Ask me anything..."}
+            className="w-full pl-4 pr-12 py-4 bg-zinc-800 border border-zinc-700 rounded-2xl text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500/50 focus:ring-4 focus:ring-emerald-500/5 transition-all resize-none min-h-[80px]"
+            rows={2}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || isLoading}
+            className="absolute right-3 bottom-3 w-10 h-10 bg-emerald-500 text-black rounded-xl flex items-center justify-center hover:bg-emerald-400 disabled:opacity-50 disabled:hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-500/20"
+          >
+            <Send size={18} />
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
+export default PlotAssistant;
