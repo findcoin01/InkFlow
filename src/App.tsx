@@ -714,7 +714,14 @@ export default function App() {
         const active = configs.find((c: any) => c.is_active === 1);
         if (active) {
           setActiveProvider(active.provider);
-          setAiConfig(active);
+          // Normalize config to match AIConfig interface (camelCase)
+          setAiConfig({
+            provider: active.provider,
+            model: active.model,
+            apiKey: active.api_key,
+            baseUrl: active.base_url,
+            parameters: active.parameters
+          });
         }
       }
     } catch (e) { console.error(e); }
@@ -1128,8 +1135,14 @@ export default function App() {
       if (res.ok) {
         setToast({ message: t.settingsSaved, type: 'success' });
         await fetchAIConfigs();
-        // Update the active aiConfig state immediately
-        setAiConfig(config);
+        // Update the active aiConfig state immediately with normalized fields
+        setAiConfig({
+          provider: config.provider,
+          model: config.model,
+          apiKey: config.api_key,
+          baseUrl: config.base_url,
+          parameters: config.parameters
+        });
       }
     } catch (e) {
       setToast({ message: t.saveError, type: 'error' });

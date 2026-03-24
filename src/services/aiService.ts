@@ -19,6 +19,14 @@ function formatAIError(error: any, provider: string): string {
   return `[${provider}] Error: ${message}`;
 }
 
+function getNormalizedConfig(config: AIConfig) {
+  return {
+    ...config,
+    apiKey: config.apiKey || (config as any).api_key || "",
+    baseUrl: config.baseUrl || (config as any).base_url
+  };
+}
+
 function getParams(config: AIConfig) {
   const defaults = {
     temperature: 0.7,
@@ -222,17 +230,18 @@ export async function* generateAIContentStream(
     fullPrompt += "\n\n重要提示：仅输出小说正文内容。不要使用 JSON。不要包含标题或元对话。";
   }
 
-  const params = getParams(config);
+  const normalizedConfig = getNormalizedConfig(config);
+  const params = getParams(normalizedConfig);
 
-  if (config.provider === 'gemini' && !config.baseUrl) {
-    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+  if (normalizedConfig.provider === 'gemini' && !normalizedConfig.baseUrl) {
+    const ai = new GoogleGenAI({ apiKey: normalizedConfig.apiKey || process.env.GEMINI_API_KEY || "" });
     const systemInstruction = `你是一位创意小说作家。${layoutInstruction} ${langInstruction} 
     严格规则：仅输出小说内容。不要包含元对话、章节摘要或结束语。
     如果是接着之前的文本创作，请从上次停止的地方开始，不要重复任何内容。`;
 
     try {
       const response = await ai.models.generateContentStream({
-        model: config.model || "gemini-3-flash-preview",
+        model: normalizedConfig.model || "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
         config: {
           temperature: params.temperature,
@@ -255,14 +264,14 @@ export async function* generateAIContentStream(
     }
   } else {
     const openai = new OpenAI({
-      apiKey: config.apiKey || "",
-      baseURL: sanitizeBaseUrl(config.baseUrl) || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      apiKey: normalizedConfig.apiKey || "",
+      baseURL: sanitizeBaseUrl(normalizedConfig.baseUrl) || (normalizedConfig.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
       dangerouslyAllowBrowser: true
     });
 
     try {
       const stream = await openai.chat.completions.create({
-        model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : (config.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
+        model: normalizedConfig.model || (normalizedConfig.provider === 'openai' ? "gpt-4o" : (normalizedConfig.provider === 'deepseek' ? "deepseek-chat" : (normalizedConfig.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
         messages: [
           { role: "system", content: `你是一位创意小说作家。${layoutInstruction} ${langInstruction} 仅输出小说正文内容。` },
           { role: "user", content: fullPrompt }
@@ -280,13 +289,14 @@ export async function* generateAIContentStream(
         }
       }
     } catch (error) {
-      console.error(`${config.provider} Stream Error:`, error);
-      throw new Error(formatAIError(error, config.provider));
+      console.error(`${normalizedConfig.provider} Stream Error:`, error);
+      throw new Error(formatAIError(error, normalizedConfig.provider));
     }
   }
 }
 
 export async function generateAIOutline(title: string, genre: string, config: AIConfig, language: string = 'en', promptTemplate?: string) {
+  const normalizedConfig = getNormalizedConfig(config);
   const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   const defaultPrompt = `为一部名为《${title}》的 ${genre} 小说创作详细的大纲。${langInstruction} 包括主要角色、情节要点和世界设定。`;
   
@@ -308,13 +318,13 @@ export async function generateAIOutline(title: string, genre: string, config: AI
     }
   }
 
-  const params = getParams(config);
+  const params = getParams(normalizedConfig);
 
-  if (config.provider === 'gemini' && !config.baseUrl) {
-    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+  if (normalizedConfig.provider === 'gemini' && !normalizedConfig.baseUrl) {
+    const ai = new GoogleGenAI({ apiKey: normalizedConfig.apiKey || process.env.GEMINI_API_KEY || "" });
     try {
       const response = await ai.models.generateContent({
-        model: config.model || "gemini-3-flash-preview",
+        model: normalizedConfig.model || "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
         config: { 
           temperature: params.temperature,
@@ -334,8 +344,8 @@ export async function generateAIOutline(title: string, genre: string, config: AI
     }
   } else {
     const openai = new OpenAI({
-      apiKey: config.apiKey || "",
-      baseURL: sanitizeBaseUrl(config.baseUrl) || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      apiKey: normalizedConfig.apiKey || "",
+      baseURL: sanitizeBaseUrl(normalizedConfig.baseUrl) || (normalizedConfig.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
       dangerouslyAllowBrowser: true
     });
 
@@ -363,13 +373,14 @@ export async function generateChapterTitle(content: string, config: AIConfig, la
   const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   const fullPrompt = `根据以下小说章节内容，生成一个简明且贴切的章节标题。${langInstruction}\n\n内容：${content.slice(0, 2000)}\n\n任务：仅输出标题文本。不要带引号，不要带“第X章”，不要带前导破折号 or 点，仅输出标题。`;
 
-  const params = getParams(config);
+  const normalizedConfig = getNormalizedConfig(config);
+  const params = getParams(normalizedConfig);
 
-  if (config.provider === 'gemini' && !config.baseUrl) {
-    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+  if (normalizedConfig.provider === 'gemini' && !normalizedConfig.baseUrl) {
+    const ai = new GoogleGenAI({ apiKey: normalizedConfig.apiKey || process.env.GEMINI_API_KEY || "" });
     try {
       const response = await ai.models.generateContent({
-        model: config.model || "gemini-3-flash-preview",
+        model: normalizedConfig.model || "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
         config: { 
           temperature: params.temperature,
@@ -390,8 +401,8 @@ export async function generateChapterTitle(content: string, config: AIConfig, la
     }
   } else {
     const openai = new OpenAI({
-      apiKey: config.apiKey || "",
-      baseURL: sanitizeBaseUrl(config.baseUrl) || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      apiKey: normalizedConfig.apiKey || "",
+      baseURL: sanitizeBaseUrl(normalizedConfig.baseUrl) || (normalizedConfig.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
       dangerouslyAllowBrowser: true
     });
 
@@ -419,13 +430,14 @@ export async function generateChapterTitleFromOutline(outline: string, chapterNu
   const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
   const fullPrompt = `根据以下小说大纲，为第 ${chapterNum} 章生成一个简明且贴切的章节标题。${langInstruction}\n\n大纲：\n${outline}\n\n任务：仅输出标题文本。不要带引号，不要带“第X章”，不要带前导破折号 or 点，仅输出标题。`;
 
-  const params = getParams(config);
+  const normalizedConfig = getNormalizedConfig(config);
+  const params = getParams(normalizedConfig);
 
-  if (config.provider === 'gemini' && !config.baseUrl) {
-    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+  if (normalizedConfig.provider === 'gemini' && !normalizedConfig.baseUrl) {
+    const ai = new GoogleGenAI({ apiKey: normalizedConfig.apiKey || process.env.GEMINI_API_KEY || "" });
     try {
       const response = await ai.models.generateContent({
-        model: config.model || "gemini-3-flash-preview",
+        model: normalizedConfig.model || "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
         config: { 
           temperature: params.temperature,
@@ -446,14 +458,14 @@ export async function generateChapterTitleFromOutline(outline: string, chapterNu
     }
   } else {
     const openai = new OpenAI({
-      apiKey: config.apiKey || "",
-      baseURL: sanitizeBaseUrl(config.baseUrl) || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      apiKey: normalizedConfig.apiKey || "",
+      baseURL: sanitizeBaseUrl(normalizedConfig.baseUrl) || (normalizedConfig.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
       dangerouslyAllowBrowser: true
     });
 
     try {
       const response = await openai.chat.completions.create({
-        model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : (config.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
+        model: normalizedConfig.model || (normalizedConfig.provider === 'openai' ? "gpt-4o" : (normalizedConfig.provider === 'deepseek' ? "deepseek-chat" : (normalizedConfig.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
         messages: [{ role: "user", content: fullPrompt }],
         temperature: params.temperature,
         top_p: params.top_p,
@@ -465,14 +477,15 @@ export async function generateChapterTitleFromOutline(outline: string, chapterNu
         tokens: response.usage?.total_tokens || 0
       };
     } catch (error) {
-      console.error(`${config.provider} Error:`, error);
+      console.error(`${normalizedConfig.provider} Error:`, error);
       return { text: "", tokens: 0 };
     }
   }
 }
 
 export async function generateNovelDescription(outline: string, config: AIConfig, language: string = 'en', promptTemplate?: string): Promise<{ text: string, tokens: number }> {
-  const params = getParams(config);
+  const normalizedConfig = getNormalizedConfig(config);
+  const params = getParams(normalizedConfig);
   const langInstruction = language === 'zh' ? "请用中文撰写。" : "Please write in English.";
   
   let fullPrompt = `You are a professional novel editor. Based on the following novel outline, write a compelling novel description (summary). The description should be between 80 and 150 words, highlighting the core conflict, main characters, and unique selling points of the story.\n\nOutline:\n${outline}\n\n${langInstruction}`;
@@ -484,11 +497,11 @@ export async function generateNovelDescription(outline: string, config: AIConfig
       .replace(/{langInstruction}/g, langInstruction);
   }
 
-  if (config.provider === 'gemini' && !config.baseUrl) {
-    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+  if (normalizedConfig.provider === 'gemini' && !normalizedConfig.baseUrl) {
+    const ai = new GoogleGenAI({ apiKey: normalizedConfig.apiKey || process.env.GEMINI_API_KEY || "" });
     try {
       const response = await ai.models.generateContent({
-        model: config.model || "gemini-3-flash-preview",
+        model: normalizedConfig.model || "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
         config: {
           temperature: params.temperature,
@@ -510,8 +523,8 @@ export async function generateNovelDescription(outline: string, config: AIConfig
     }
   } else {
     const openai = new OpenAI({
-      apiKey: config.apiKey || "",
-      baseURL: sanitizeBaseUrl(config.baseUrl) || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      apiKey: normalizedConfig.apiKey || "",
+      baseURL: sanitizeBaseUrl(normalizedConfig.baseUrl) || (normalizedConfig.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
       dangerouslyAllowBrowser: true
     });
 
@@ -556,13 +569,14 @@ export async function generateChapterSummary(content: string, config: AIConfig, 
     }
   }
 
-  const params = getParams(config);
+  const normalizedConfig = getNormalizedConfig(config);
+  const params = getParams(normalizedConfig);
 
-  if (config.provider === 'gemini' && !config.baseUrl) {
-    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+  if (normalizedConfig.provider === 'gemini' && !normalizedConfig.baseUrl) {
+    const ai = new GoogleGenAI({ apiKey: normalizedConfig.apiKey || process.env.GEMINI_API_KEY || "" });
     try {
       const response = await ai.models.generateContent({
-        model: config.model || "gemini-3-flash-preview",
+        model: normalizedConfig.model || "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
         config: { 
           temperature: params.temperature,
@@ -582,8 +596,8 @@ export async function generateChapterSummary(content: string, config: AIConfig, 
     }
   } else {
     const openai = new OpenAI({
-      apiKey: config.apiKey || "",
-      baseURL: sanitizeBaseUrl(config.baseUrl) || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      apiKey: normalizedConfig.apiKey || "",
+      baseURL: sanitizeBaseUrl(normalizedConfig.baseUrl) || (normalizedConfig.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
       dangerouslyAllowBrowser: true
     });
     try {
