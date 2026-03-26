@@ -482,6 +482,15 @@ async function startServer() {
         "INSERT INTO token_logs (novel_id, type, tokens) VALUES (?, ?, ?)"
       ).run(novel_id, finalType, tokens);
       db.prepare("UPDATE novels SET total_tokens = total_tokens + ? WHERE id = ?").run(tokens, novel_id);
+      
+      // Also log to operation_logs for visibility in the general logs tab
+      const novel = db.prepare("SELECT title FROM novels WHERE id = ?").get(novel_id) as { title: string };
+      logOperation("AI Token 消耗", { 
+        小说: novel?.title || `ID: ${novel_id}`, 
+        类型: finalType, 
+        消耗: `${tokens} tokens` 
+      });
+
       res.status(201).json({ success: true });
     } catch (error) {
       console.error("Failed to log tokens:", error);

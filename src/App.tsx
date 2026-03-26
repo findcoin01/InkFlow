@@ -3757,6 +3757,8 @@ export default function App() {
                                   ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
                                   : log.type === 'editing'
                                   ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+                                  : log.type === 'plot_assistant'
+                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                   : "bg-blue-500/10 text-blue-400 border-blue-500/20"
                               )}>
                                 {log.type === 'generation' ? t.generateChapter : 
@@ -3768,6 +3770,7 @@ export default function App() {
                                  log.type === 'title' ? t.generateTitle :
                                  log.type === 'novel_update' ? t.novelUpdate :
                                  log.type === 'editing' ? t.polish :
+                                 log.type === 'plot_assistant' ? t.plotAssistant :
                                  t.polish}
                               </span>
                             </td>
