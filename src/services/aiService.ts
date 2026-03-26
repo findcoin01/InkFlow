@@ -130,7 +130,7 @@ export async function generateAIContent(
 
     try {
       const response = await ai.models.generateContent({
-        model: config.model || "gemini-3-flash-preview",
+        model: normalizedConfig.model || "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
         config: {
           temperature: params.temperature,
@@ -176,14 +176,14 @@ export async function generateAIContent(
   } else {
     // OpenAI, DeepSeek, Custom, or Gemini with BaseUrl
     const openai = new OpenAI({
-      apiKey: config.apiKey || "",
-      baseURL: sanitizeBaseUrl(config.baseUrl) || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      apiKey: normalizedConfig.apiKey || "",
+      baseURL: sanitizeBaseUrl(normalizedConfig.baseUrl) || (normalizedConfig.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
       dangerouslyAllowBrowser: true
     });
 
     try {
       const response = await openai.chat.completions.create({
-        model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : (config.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
+        model: normalizedConfig.model || (normalizedConfig.provider === 'openai' ? "gpt-4o" : (normalizedConfig.provider === 'deepseek' ? "deepseek-chat" : (normalizedConfig.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
         messages: [
           { role: "system", content: `你是一位创意小说作家。${layoutInstruction} ${langInstruction} 始终以 JSON 格式返回响应，包含 'title' 和 'content' 键。` },
           { role: "user", content: fullPrompt }
@@ -355,7 +355,7 @@ export async function generateChapterTitle(content: string, config: AIConfig, la
 
     try {
       const response = await openai.chat.completions.create({
-        model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : (config.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
+        model: normalizedConfig.model || (normalizedConfig.provider === 'openai' ? "gpt-4o" : (normalizedConfig.provider === 'deepseek' ? "deepseek-chat" : (normalizedConfig.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
         messages: [{ role: "user", content: fullPrompt }],
         temperature: params.temperature,
         top_p: params.top_p,
@@ -367,7 +367,7 @@ export async function generateChapterTitle(content: string, config: AIConfig, la
         tokens: response.usage?.total_tokens || 0
       };
     } catch (error) {
-      console.error(`${config.provider} Error:`, error);
+      console.error(`${normalizedConfig.provider} Error:`, error);
       return { text: "Untitled Chapter", tokens: 0 };
     }
   }
@@ -477,7 +477,7 @@ export async function generateNovelDescription(outline: string, config: AIConfig
 
     try {
       const response = await openai.chat.completions.create({
-        model: config.model || (config.provider === 'deepseek' ? "deepseek-chat" : "gpt-4o"),
+        model: normalizedConfig.model || (normalizedConfig.provider === 'deepseek' ? "deepseek-chat" : "gpt-4o"),
         messages: [
           { role: "system", content: `You are a professional novel editor. ${langInstruction} Write a compelling description that hooks the reader.` },
           { role: "user", content: fullPrompt }
@@ -493,7 +493,7 @@ export async function generateNovelDescription(outline: string, config: AIConfig
       };
     } catch (error) {
       console.error("AI Error:", error);
-      throw new Error(formatAIError(error, config.provider));
+      throw new Error(formatAIError(error, normalizedConfig.provider));
     }
   }
 }
@@ -549,7 +549,7 @@ export async function generateChapterSummary(content: string, config: AIConfig, 
     });
     try {
       const response = await openai.chat.completions.create({
-        model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : (config.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
+        model: normalizedConfig.model || (normalizedConfig.provider === 'openai' ? "gpt-4o" : (normalizedConfig.provider === 'deepseek' ? "deepseek-chat" : (normalizedConfig.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
         messages: [{ role: "user", content: fullPrompt }],
         temperature: params.temperature,
         top_p: params.top_p,
@@ -560,7 +560,7 @@ export async function generateChapterSummary(content: string, config: AIConfig, 
         tokens: response.usage?.total_tokens || 0
       };
     } catch (error) {
-      console.error(`${config.provider} Summary Error:`, error);
+      console.error(`${normalizedConfig.provider} Summary Error:`, error);
       return { text: "", tokens: 0 };
     }
   }
@@ -686,15 +686,16 @@ export async function extractNovelMetadata(
   2. 仅输出更新后的元数据。
   3. 必须以有效的 JSON 格式返回响应。`;
 
-  const params = getParams(config);
+  const normalizedConfig = getNormalizedConfig(config);
+  const params = getParams(normalizedConfig);
   // Increase max_tokens for metadata extraction as it can be quite large
   const metadataMaxTokens = Math.max(params.max_tokens, 8192);
 
-  if (config.provider === 'gemini' && !config.baseUrl) {
-    const ai = new GoogleGenAI({ apiKey: config.apiKey || process.env.GEMINI_API_KEY || "" });
+  if (normalizedConfig.provider === 'gemini' && !normalizedConfig.baseUrl) {
+    const ai = new GoogleGenAI({ apiKey: normalizedConfig.apiKey || process.env.GEMINI_API_KEY || "" });
     try {
       const response = await ai.models.generateContent({
-        model: config.model || "gemini-3-flash-preview",
+        model: normalizedConfig.model || "gemini-3-flash-preview",
         contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
         config: {
           temperature: params.temperature,
@@ -731,14 +732,14 @@ export async function extractNovelMetadata(
     }
   } else {
     const openai = new OpenAI({
-      apiKey: config.apiKey || "",
-      baseURL: sanitizeBaseUrl(config.baseUrl) || (config.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
+      apiKey: normalizedConfig.apiKey || "",
+      baseURL: sanitizeBaseUrl(normalizedConfig.baseUrl) || (normalizedConfig.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
       dangerouslyAllowBrowser: true
     });
 
     try {
       const response = await openai.chat.completions.create({
-        model: config.model || (config.provider === 'openai' ? "gpt-4o" : (config.provider === 'deepseek' ? "deepseek-chat" : (config.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
+        model: normalizedConfig.model || (normalizedConfig.provider === 'openai' ? "gpt-4o" : (normalizedConfig.provider === 'deepseek' ? "deepseek-chat" : (normalizedConfig.provider === 'gemini' ? "gemini-3-flash-preview" : ""))),
         messages: [
           { role: "system", content: "你是一位创意编辑。以 JSON 格式返回响应，包含 'characters'、'storylines'、'world_setting' 和 'relationships' 键。" },
           { role: "user", content: fullPrompt }

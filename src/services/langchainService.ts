@@ -19,12 +19,18 @@ export class LangChainService {
   private static memories: Record<string, BufferMemory> = {};
 
   private static getModel(config: AIConfig, signal?: AbortSignal) {
-    const params = this.getParams(config);
+    const normalizedConfig = {
+      ...config,
+      apiKey: config.apiKey || (config as any).api_key || "",
+      baseUrl: config.baseUrl || (config as any).base_url
+    };
+    const params = this.getParams(normalizedConfig);
     
-    if (config.provider === 'gemini') {
+    // If Gemini but has a baseUrl, it's likely a proxy using OpenAI-compatible API
+    if (normalizedConfig.provider === 'gemini' && !normalizedConfig.baseUrl) {
       return new ChatGoogleGenerativeAI({
-        apiKey: config.apiKey || process.env.GEMINI_API_KEY || "",
-        model: config.model || "gemini-1.5-flash",
+        apiKey: normalizedConfig.apiKey || process.env.GEMINI_API_KEY || "",
+        model: normalizedConfig.model || "gemini-3-flash-preview",
         temperature: params.temperature,
         topP: params.top_p,
         maxOutputTokens: params.max_tokens,
@@ -36,15 +42,23 @@ export class LangChainService {
         }] : []
       });
     } else {
-      // OpenAI or compatible (DeepSeek, etc.)
+      // OpenAI, DeepSeek, Custom, or Gemini with BaseUrl (OpenAI-compatible)
+      let modelName = normalizedConfig.model;
+      if (!modelName) {
+        if (normalizedConfig.provider === 'openai') modelName = "gpt-4o";
+        else if (normalizedConfig.provider === 'deepseek') modelName = "deepseek-chat";
+        else if (normalizedConfig.provider === 'gemini') modelName = "gemini-3-flash-preview";
+        else modelName = "gpt-3.5-turbo";
+      }
+
       return new ChatOpenAI({
-        apiKey: config.apiKey,
-        model: config.model || "gpt-3.5-turbo",
+        apiKey: normalizedConfig.apiKey,
+        model: modelName,
         temperature: params.temperature,
         topP: params.top_p,
         maxTokens: params.max_tokens,
         configuration: {
-          baseURL: config.baseUrl || undefined,
+          baseURL: normalizedConfig.baseUrl || (normalizedConfig.provider === 'deepseek' ? "https://api.deepseek.com" : undefined),
         },
         streaming: true,
         callbacks: signal ? [{
@@ -169,11 +183,11 @@ export class LangChainService {
     const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
 
     const systemTemplate = `你是一位专业的小说编辑和情节助手。
-${langInstruction}
+{langInstruction}
 你正在协助作者创作小说。
 
 小说背景和当前进度：
-${context}
+{context}
 
 请基于上述背景和作者的提问，提供有创意的建议、逻辑检查或情节构思。`;
 
@@ -189,7 +203,11 @@ ${context}
       prompt: chatPrompt
     });
 
-    const response = await chain.invoke({ input: message });
+    const response = await chain.invoke({ 
+      input: message,
+      context: context,
+      langInstruction: langInstruction
+    });
     return response.response;
   }
 }
