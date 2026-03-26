@@ -279,6 +279,12 @@ export class LangChainService {
     });
 
     await memory.saveContext({ input: message }, { output: response });
-    return response;
+    
+    const estimatedTokens = Math.ceil((message.length + context.length + response.length) / 4);
+    
+    return {
+      text: response,
+      tokens: estimatedTokens
+    };
   }
 }

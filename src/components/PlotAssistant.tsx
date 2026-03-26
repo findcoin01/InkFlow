@@ -78,6 +78,22 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, o
           return newMessages;
         });
       }
+
+      // Log token usage
+      const estimatedTokens = Math.ceil((userMsg.length + context.length + fullContent.length) / 4);
+      try {
+        await fetch('/api/token-logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            novel_id: novel.id,
+            type: 'plot_assistant',
+            tokens: estimatedTokens
+          })
+        });
+      } catch (logError) {
+        console.error("Failed to log Plot Assistant tokens:", logError);
+      }
     } catch (error: any) {
       if (error.name === 'AbortError') return;
       console.error("Plot Assistant Error:", error);
