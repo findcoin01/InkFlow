@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Bot, User, Loader2, Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import ReactMarkdown from 'react-markdown';
 import { LangChainService } from '../services/langchainService';
 import { AIConfig, Novel } from '../types';
 
@@ -21,12 +22,21 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, o
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isLoading]);
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -36,23 +46,45 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, o
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
     setIsLoading(true);
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     try {
       const context = `书名：${novel.title}\n简介：${novel.description}\n大纲：${novel.outlines?.find(o => o.is_active === 1)?.content || "无"}\n角色：${novel.characters || "无"}\n世界观：${novel.world_setting || "无"}`;
       
-      const response = await LangChainService.chatWithMemory(
+      // Add an empty assistant message to start streaming into
+      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+      
+      const stream = LangChainService.chatWithMemoryStream(
         userMsg,
         novel.id.toString(),
         context,
         aiConfig,
-        language
+        language,
+        abortControllerRef.current.signal
       );
 
-      setMessages(prev => [...prev, { role: 'assistant', content: response }]);
-    } catch (error) {
+      let fullContent = "";
+      for await (const chunk of stream) {
+        fullContent += chunk;
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastMsg = newMessages[newMessages.length - 1];
+          if (lastMsg && lastMsg.role === 'assistant') {
+            lastMsg.content = fullContent;
+          }
+          return newMessages;
+        });
+      }
+    } catch (error: any) {
+      if (error.name === 'AbortError') return;
       console.error("Plot Assistant Error:", error);
       setMessages(prev => [...prev, { role: 'assistant', content: "抱歉，我遇到了一些问题，请稍后再试。" }]);
     } finally {
       setIsLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -117,14 +149,20 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, o
                     ? 'bg-emerald-500 text-black font-medium rounded-tr-none' 
                     : 'bg-zinc-800 text-zinc-200 border border-zinc-700/50 rounded-tl-none'
                 }`}>
-                  {msg.content}
+                  {msg.role === 'user' ? (
+                    msg.content
+                  ) : (
+                    <div className="markdown-body prose prose-invert prose-sm max-w-none">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
           ))}
         </AnimatePresence>
         
-        {isLoading && (
+        {isLoading && messages[messages.length - 1]?.role === 'user' && (
           <div className="flex justify-start">
             <div className="flex gap-3 items-center text-zinc-500 text-xs font-medium">
               <div className="w-8 h-8 rounded-xl bg-zinc-800 flex items-center justify-center">

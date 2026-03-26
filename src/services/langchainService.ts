@@ -162,7 +162,72 @@ export class LangChainService {
   }
 
   /**
-   * Chat with memory for plot assistance
+   * Chat with memory for plot assistance (Streaming)
+   */
+  static async *chatWithMemoryStream(
+    message: string,
+    novelId: string,
+    context: string,
+    config: AIConfig,
+    language: string = 'zh',
+    signal?: AbortSignal
+  ) {
+    if (!this.memories[novelId]) {
+      this.memories[novelId] = new BufferMemory({
+        returnMessages: true,
+        memoryKey: "history"
+      });
+    }
+
+    const model = this.getModel(config, signal);
+    const langInstruction = language === 'zh' ? "请使用简体中文回答。" : "Please respond in English.";
+
+    const systemTemplate = `你是一位专业的小说编辑和情节助手。
+{langInstruction}
+你正在协助作者创作小说。
+
+小说背景和当前进度：
+{context}
+
+请基于上述背景和作者的提问，提供有创意的建议、逻辑检查或情节构思。`;
+
+    const chatPrompt = ChatPromptTemplate.fromMessages([
+      SystemMessagePromptTemplate.fromTemplate(systemTemplate),
+      new MessagesPlaceholder("history"),
+      HumanMessagePromptTemplate.fromTemplate("{input}")
+    ]);
+
+    const memory = this.memories[novelId];
+    const memoryVariables = await memory.loadMemoryVariables({});
+    const history = memoryVariables.history;
+
+    const chain = RunnableSequence.from([
+      chatPrompt,
+      model,
+      new StringOutputParser()
+    ]);
+
+    const stream = await chain.stream({ 
+      input: message,
+      context: context,
+      langInstruction: langInstruction,
+      history: history
+    });
+
+    let fullResponse = "";
+    for await (const chunk of stream) {
+      if (signal?.aborted) break;
+      fullResponse += chunk;
+      yield chunk;
+    }
+
+    if (!signal?.aborted) {
+      await memory.saveContext({ input: message }, { output: fullResponse });
+    }
+  }
+
+  /**
+   * Chat with memory for plot assistance (Legacy non-streaming)
    */
   static async chatWithMemory(
     message: string,
