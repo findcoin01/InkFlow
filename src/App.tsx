@@ -35,7 +35,9 @@ import {
   Wand2,
   Download,
   FileDown,
-  Search
+  Search,
+  History,
+  Loader2
 } from "lucide-react";
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -430,6 +432,10 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isPlotAssistantOpen, setIsPlotAssistantOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [chapterVersions, setChapterVersions] = useState<any[]>([]);
+  const [isSavingVersion, setIsSavingVersion] = useState(false);
+  const [isRestoringVersion, setIsRestoringVersion] = useState(false);
   const [novels, setNovels] = useState<Novel[]>([]);
   const [stats, setStats] = useState<TokenStats | null>(null);
   const [tokenLogs, setTokenLogs] = useState<TokenLog[]>([]);
@@ -1337,6 +1343,10 @@ export default function App() {
       
       let streamedText = "";
       const promptTemplate = getActivePrompt('polish');
+      
+      // Save version before polishing
+      await saveChapterVersion(currentChapter.id);
+      
       const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate);
       
       for await (const chunk of stream) {
@@ -1396,6 +1406,10 @@ export default function App() {
 
       let streamedText = "";
       const promptTemplate = getActivePrompt('chapter');
+      
+      // Save version before AI write
+      await saveChapterVersion(currentChapter.id);
+      
       const stream = generateAIContentStream(prompt, context, aiConfig, writingConfig, lang, controller.signal, promptTemplate, currentContent, nextChapterContext);
       
       for await (const chunk of stream) {
@@ -1671,6 +1685,52 @@ export default function App() {
   const handleDeleteChapter = async (e: React.MouseEvent, chapterId: number) => {
     e.stopPropagation();
     setChapterToDelete(chapterId);
+  };
+
+  const fetchChapterVersions = async (chapterId: number) => {
+    try {
+      const res = await fetch(`/api/chapters/${chapterId}/versions`);
+      if (res.ok) {
+        const data = await res.json();
+        setChapterVersions(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch versions:", e);
+    }
+  };
+
+  const saveChapterVersion = async (chapterId: number) => {
+    if (isSavingVersion) return;
+    setIsSavingVersion(true);
+    try {
+      const res = await fetch(`/api/chapters/${chapterId}/versions`, { method: 'POST' });
+      if (res.ok) {
+        await fetchChapterVersions(chapterId);
+        setToast({ message: t.versionSaved, type: 'success' });
+      }
+    } catch (e) {
+      console.error("Failed to save version:", e);
+    } finally {
+      setIsSavingVersion(false);
+    }
+  };
+
+  const restoreChapterVersion = async (chapterId: number, versionId: number) => {
+    if (!confirm(t.restoreConfirm)) return;
+    setIsRestoringVersion(true);
+    try {
+      const res = await fetch(`/api/chapters/${chapterId}/restore-version/${versionId}`, { method: 'POST' });
+      if (res.ok) {
+        await fetchNovelDetails(selectedNovel.id, chapterId);
+        await fetchChapterVersions(chapterId);
+        setToast({ message: t.restore + " " + t.completed, type: 'success' });
+        setIsHistoryOpen(false);
+      }
+    } catch (e) {
+      console.error("Failed to restore version:", e);
+    } finally {
+      setIsRestoringVersion(false);
+    }
   };
 
   const confirmDeleteChapter = async () => {
@@ -2846,6 +2906,17 @@ export default function App() {
                             </button>
                           </div>
                           <div className="flex items-center gap-4 text-xs text-zinc-500 shrink-0">
+                            <button
+                              onClick={() => {
+                                fetchChapterVersions(currentChapter.id);
+                                setIsHistoryOpen(true);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-zinc-800 transition-colors"
+                              title={t.history}
+                            >
+                              <History size={12} />
+                              <span>{t.history}</span>
+                            </button>
                             <button
                               onClick={() => setIsMarkdownPreview(!isMarkdownPreview)}
                               className={cn(
@@ -4860,7 +4931,103 @@ export default function App() {
             aiConfig={aiConfig}
             language={lang}
             onClose={() => setIsPlotAssistantOpen(false)} 
+            currentChapter={currentChapter}
+            onUpdateChapter={(content) => {
+              if (currentChapter) {
+                saveChapterVersion(currentChapter.id);
+                setCurrentChapter({ ...currentChapter, content });
+                // Also save to database
+                fetch(`/api/chapters/${currentChapter.id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ content }),
+                }).then(() => {
+                  fetchNovelDetails(selectedNovel.id, currentChapter.id);
+                  setToast({ message: t.applyToChapter + " " + t.completed, type: 'success' });
+                });
+              }
+            }}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isHistoryOpen && currentChapter && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]"
+            >
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-white">{t.history} - {currentChapter.title}</h3>
+                  <p className="text-sm text-zinc-500">{t.version} {t.history}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => saveChapterVersion(currentChapter.id)}
+                    disabled={isSavingVersion}
+                    className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-bold transition-all flex items-center gap-2"
+                  >
+                    {isSavingVersion ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                    {t.saveVersion}
+                  </button>
+                  <button 
+                    onClick={() => setIsHistoryOpen(false)}
+                    className="p-2 text-zinc-500 hover:text-white transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                {chapterVersions.length === 0 ? (
+                  <div className="text-center py-12 text-zinc-600">
+                    <History size={48} className="mx-auto mb-4 opacity-20" />
+                    <p>{t.noVersions}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {chapterVersions.map((version) => (
+                      <div 
+                        key={version.id}
+                        className="p-4 bg-zinc-800/50 border border-zinc-800 rounded-xl hover:border-zinc-700 transition-all group"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-500">
+                              <Clock size={16} />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold text-zinc-200">
+                                {formatDate(version.created_at, 'yyyy-MM-dd HH:mm:ss')}
+                              </p>
+                              <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+                                {version.content?.length || 0} {t.characters}
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => restoreChapterVersion(currentChapter.id, version.id)}
+                            disabled={isRestoringVersion}
+                            className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 rounded-lg text-xs font-bold transition-all opacity-0 group-hover:opacity-100"
+                          >
+                            {t.restore}
+                          </button>
+                        </div>
+                        <div className="text-xs text-zinc-500 line-clamp-2 italic">
+                          {version.content?.substring(0, 200)}...
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

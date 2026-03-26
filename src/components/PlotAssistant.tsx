@@ -15,14 +15,49 @@ interface PlotAssistantProps {
   aiConfig: AIConfig;
   onClose: () => void;
   language: string;
+  currentChapter?: any;
+  onUpdateChapter?: (content: string) => void;
 }
 
-export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, onClose, language }) => {
+export const PlotAssistant: React.FC<PlotAssistantProps> = ({ 
+  novel, 
+  aiConfig, 
+  onClose, 
+  language,
+  currentChapter,
+  onUpdateChapter
+}) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [novel.id]);
+
+  const fetchHistory = async () => {
+    try {
+      const res = await fetch(`/api/novels/${novel.id}/plot-assistant-messages`);
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(data.map((m: any) => ({ role: m.role, content: m.content })));
+      }
+    } catch (e) {
+      console.error("Failed to fetch history:", e);
+    }
+  };
+
+  const clearHistory = async () => {
+    if (!confirm(language === 'zh' ? "确定要清空对话记录吗？" : "Are you sure you want to clear conversation history?")) return;
+    try {
+      await fetch(`/api/novels/${novel.id}/plot-assistant-messages`, { method: 'DELETE' });
+      setMessages([]);
+    } catch (e) {
+      console.error("Failed to clear history:", e);
+    }
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -38,12 +73,25 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, o
     };
   }, []);
 
+  const saveMessage = async (role: 'user' | 'assistant', content: string) => {
+    try {
+      await fetch(`/api/novels/${novel.id}/plot-assistant-messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role, content })
+      });
+    } catch (e) {
+      console.error("Failed to save message:", e);
+    }
+  };
+
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
     const userMsg = input.trim();
     setInput('');
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    await saveMessage('user', userMsg);
     setIsLoading(true);
 
     if (abortControllerRef.current) {
@@ -52,8 +100,12 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, o
     abortControllerRef.current = new AbortController();
 
     try {
-      const context = `书名：${novel.title}\n简介：${novel.description}\n大纲：${novel.outlines?.find(o => o.is_active === 1)?.content || "无"}\n角色：${novel.characters || "无"}\n世界观：${novel.world_setting || "无"}`;
+      let context = `书名：${novel.title}\n简介：${novel.description}\n大纲：${novel.outlines?.find(o => o.is_active === 1)?.content || "无"}\n角色：${novel.characters || "无"}\n世界观：${novel.world_setting || "无"}`;
       
+      if (currentChapter) {
+        context += `\n\n当前正在编辑章节：${currentChapter.title}\n内容：${currentChapter.content?.substring(0, 2000)}...`;
+      }
+
       // Add an empty assistant message to start streaming into
       setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
       
@@ -78,6 +130,8 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, o
           return newMessages;
         });
       }
+
+      await saveMessage('assistant', fullContent);
 
       // Log token usage
       const estimatedTokens = Math.ceil((userMsg.length + context.length + fullContent.length) / 4);
@@ -104,6 +158,11 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, o
     }
   };
 
+  const extractCodeBlock = (text: string) => {
+    const match = text.match(/```(?:[\w]*)\n([\s\S]*?)```/);
+    return match ? match[1] : null;
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, x: 20 }}
@@ -121,12 +180,23 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, o
             <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold">LangChain AI</p>
           </div>
         </div>
-        <button 
-          onClick={onClose}
-          className="w-8 h-8 rounded-full hover:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:text-white transition-colors"
-        >
-          <X size={20} />
-        </button>
+        <div className="flex items-center gap-2">
+          {messages.length > 0 && (
+            <button 
+              onClick={clearHistory}
+              className="p-2 text-zinc-500 hover:text-rose-400 transition-colors"
+              title={language === 'zh' ? "清空对话" : "Clear History"}
+            >
+              <X size={16} />
+            </button>
+          )}
+          <button 
+            onClick={onClose}
+            className="w-8 h-8 rounded-full hover:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:text-white transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
       </div>
 
       <div 
@@ -160,16 +230,33 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({ novel, aiConfig, o
                 }`}>
                   {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
                 </div>
-                <div className={`p-4 rounded-2xl text-sm leading-relaxed ${
-                  msg.role === 'user' 
-                    ? 'bg-emerald-500 text-black font-medium rounded-tr-none' 
-                    : 'bg-zinc-800 text-zinc-200 border border-zinc-700/50 rounded-tl-none'
-                }`}>
-                  {msg.role === 'user' ? (
-                    msg.content
-                  ) : (
-                    <div className="markdown-body prose prose-invert prose-sm max-w-none">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                <div className="flex flex-col gap-2">
+                  <div className={`p-4 rounded-2xl text-sm leading-relaxed ${
+                    msg.role === 'user' 
+                      ? 'bg-emerald-500 text-black font-medium rounded-tr-none' 
+                      : 'bg-zinc-800 text-zinc-200 border border-zinc-700/50 rounded-tl-none'
+                  }`}>
+                    {msg.role === 'user' ? (
+                      msg.content
+                    ) : (
+                      <div className="markdown-body prose prose-invert prose-sm max-w-none">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {msg.role === 'assistant' && onUpdateChapter && currentChapter && (
+                    <div className="flex justify-start">
+                      <button
+                        onClick={() => {
+                          const code = extractCodeBlock(msg.content);
+                          onUpdateChapter(code || msg.content);
+                        }}
+                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold uppercase tracking-widest flex items-center gap-1 bg-emerald-500/5 px-2 py-1 rounded border border-emerald-500/10"
+                      >
+                        <Sparkles size={10} />
+                        {language === 'zh' ? "应用到章节" : "Apply to Chapter"}
+                      </button>
                     </div>
                   )}
                 </div>

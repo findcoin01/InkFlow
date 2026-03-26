@@ -139,6 +139,24 @@ db.exec(`
     FOREIGN KEY (chapter_id) REFERENCES chapters(id),
     FOREIGN KEY (platform_id) REFERENCES platforms(id)
   );
+
+  CREATE TABLE IF NOT EXISTS plot_assistant_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    novel_id INTEGER NOT NULL,
+    role TEXT NOT NULL, -- 'user', 'assistant'
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (novel_id) REFERENCES novels(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS chapter_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chapter_id INTEGER NOT NULL,
+    content TEXT,
+    summary TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (chapter_id) REFERENCES chapters(id)
+  );
 `);
 
 // Migration: Add recurrence column if it doesn't exist
@@ -1008,6 +1026,49 @@ async function startServer() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
+
+  // Plot Assistant Messages
+  app.get("/api/novels/:id/plot-assistant-messages", (req, res) => {
+    const messages = db.prepare("SELECT * FROM plot_assistant_messages WHERE novel_id = ? ORDER BY created_at ASC").all(req.params.id);
+    res.json(messages);
+  });
+
+  app.post("/api/novels/:id/plot-assistant-messages", (req, res) => {
+    const { role, content } = req.body;
+    const result = db.prepare("INSERT INTO plot_assistant_messages (novel_id, role, content) VALUES (?, ?, ?)").run(req.params.id, role, content);
+    res.json({ id: result.lastInsertRowid });
+  });
+
+  app.delete("/api/novels/:id/plot-assistant-messages", (req, res) => {
+    db.prepare("DELETE FROM plot_assistant_messages WHERE novel_id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  // Chapter Versions
+  app.get("/api/chapters/:id/versions", (req, res) => {
+    const versions = db.prepare("SELECT * FROM chapter_versions WHERE chapter_id = ? ORDER BY created_at DESC").all(req.params.id);
+    res.json(versions);
+  });
+
+  app.post("/api/chapters/:id/versions", (req, res) => {
+    const chapter = db.prepare("SELECT content, summary FROM chapters WHERE id = ?").get(req.params.id) as any;
+    if (!chapter) return res.status(404).json({ error: "Chapter not found" });
+    
+    const result = db.prepare("INSERT INTO chapter_versions (chapter_id, content, summary) VALUES (?, ?, ?)").run(req.params.id, chapter.content, chapter.summary);
+    res.json({ id: result.lastInsertRowid });
+  });
+
+  app.post("/api/chapters/:id/restore-version/:versionId", (req, res) => {
+    const version = db.prepare("SELECT * FROM chapter_versions WHERE id = ? AND chapter_id = ?").get(req.params.versionId, req.params.id) as any;
+    if (!version) return res.status(404).json({ error: "Version not found" });
+
+    // Save current as a version before restoring
+    const current = db.prepare("SELECT content, summary FROM chapters WHERE id = ?").get(req.params.id) as any;
+    db.prepare("INSERT INTO chapter_versions (chapter_id, content, summary) VALUES (?, ?, ?)").run(req.params.id, current.content, current.summary);
+
+    db.prepare("UPDATE chapters SET content = ?, summary = ? WHERE id = ?").run(version.content, version.summary, req.params.id);
+    res.json({ success: true });
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
