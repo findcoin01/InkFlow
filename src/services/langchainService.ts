@@ -1,5 +1,5 @@
-import { BufferMemory } from "langchain/memory";
-import { ConversationChain } from "langchain/chains";
+import { BufferMemory } from "@langchain/core/memory";
+import { ConversationChain } from "@langchain/community/chains/conversation";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
 import { 
