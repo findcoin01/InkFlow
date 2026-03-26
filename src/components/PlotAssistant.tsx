@@ -16,6 +16,7 @@ interface PlotAssistantProps {
   onClose: () => void;
   language: string;
   currentChapter?: any;
+  setToast: (toast: { message: string, type: 'success' | 'error' | 'info' }) => void;
   onUpdateChapter?: (content: string, mode?: 'append' | 'replace') => void;
 }
 
@@ -25,6 +26,7 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({
   onClose, 
   language,
   currentChapter,
+  setToast,
   onUpdateChapter
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -47,9 +49,11 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({
         setMessages(data.map((m: any) => ({ role: m.role, content: m.content })));
       } else {
         console.error("Failed to fetch history, status:", res.status);
+        setToast({ message: language === 'zh' ? "获取历史记录失败" : "Failed to fetch history", type: 'error' });
       }
     } catch (e) {
       console.error("Failed to fetch history:", e);
+      setToast({ message: language === 'zh' ? "获取历史记录失败" : "Failed to fetch history", type: 'error' });
     }
   };
 
@@ -82,18 +86,20 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({
   const saveMessage = async (role: 'user' | 'assistant', content: string) => {
     try {
       console.log(`Saving message for novel: ${novel.id}, role: ${role}`);
-      const res = await fetch(`/api/novels/${novel.id}/plot-assistant-messages`, {
+      const res = await fetch(`/api/novels/:id/plot-assistant-messages`.replace(':id', novel.id.toString()), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role, content })
       });
       if (!res.ok) {
         console.error("Failed to save message, status:", res.status);
+        setToast({ message: language === 'zh' ? "保存消息失败" : "Failed to save message", type: 'error' });
       } else {
         console.log("Message saved successfully");
       }
     } catch (e) {
       console.error("Failed to save message:", e);
+      setToast({ message: language === 'zh' ? "保存消息失败" : "Failed to save message", type: 'error' });
     }
   };
 
@@ -195,6 +201,13 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button 
+            onClick={fetchHistory}
+            className="p-2 text-zinc-500 hover:text-emerald-400 transition-colors"
+            title={language === 'zh' ? "刷新记录" : "Refresh History"}
+          >
+            <RefreshCw size={16} className={isLoading ? "animate-spin" : ""} />
+          </button>
           {messages.length > 0 && (
             <button 
               onClick={clearHistory}

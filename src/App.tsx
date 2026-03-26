@@ -1201,7 +1201,7 @@ export default function App() {
       if (!res.ok) throw new Error(t.saveError || "Failed to save chapter");
       
       // Save version if it's a manual save or if content changed significantly
-      if (chapterToSave.content !== lastSavedContentRef.current) {
+      if (!isAuto || chapterToSave.content !== lastSavedContentRef.current) {
         await saveChapterVersion(chapterToSave.id);
       }
       
@@ -2824,9 +2824,19 @@ export default function App() {
                   <button 
                     onClick={() => handleSaveChapter()}
                     className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex items-center gap-2 transition-all"
+                    title={t.save}
                   >
                     <Save size={18} />
-                    {t.save}
+                    <span className="hidden sm:inline">{t.save}</span>
+                  </button>
+                  <button 
+                    onClick={() => saveChapterVersion(currentChapter.id)}
+                    disabled={isSavingVersion}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-emerald-900/20"
+                    title={t.saveVersion}
+                  >
+                    {isSavingVersion ? <Loader2 size={18} className="animate-spin" /> : <Clock size={18} />}
+                    <span className="hidden sm:inline">{t.saveVersion}</span>
                   </button>
                 </div>
               </header>
@@ -4978,6 +4988,7 @@ export default function App() {
             language={lang}
             onClose={() => setIsPlotAssistantOpen(false)} 
             currentChapter={currentChapter}
+            setToast={setToast}
             onUpdateChapter={async (content, mode = 'replace') => {
               if (currentChapter) {
                 // Ensure version is saved before modification
