@@ -1,5 +1,4 @@
 import { BufferMemory } from "@langchain/classic/memory";
-import { ConversationChain } from "@langchain/classic/chains";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
 import { 
@@ -197,17 +196,24 @@ export class LangChainService {
       HumanMessagePromptTemplate.fromTemplate("{input}")
     ]);
 
-    const chain = new ConversationChain({
-      llm: model,
-      memory: this.memories[novelId],
-      prompt: chatPrompt
-    });
+    const memory = this.memories[novelId];
+    const memoryVariables = await memory.loadMemoryVariables({});
+    const history = memoryVariables.history;
+
+    const chain = RunnableSequence.from([
+      chatPrompt,
+      model,
+      new StringOutputParser()
+    ]);
 
     const response = await chain.invoke({ 
       input: message,
       context: context,
-      langInstruction: langInstruction
+      langInstruction: langInstruction,
+      history: history
     });
-    return response.response;
+
+    await memory.saveContext({ input: message }, { output: response });
+    return response;
   }
 }
