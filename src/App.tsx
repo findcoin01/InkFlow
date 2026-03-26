@@ -436,6 +436,7 @@ export default function App() {
   const [chapterVersions, setChapterVersions] = useState<any[]>([]);
   const [isSavingVersion, setIsSavingVersion] = useState(false);
   const [isRestoringVersion, setIsRestoringVersion] = useState(false);
+  const lastSavedContentRef = useRef<string>("");
   const [novels, setNovels] = useState<Novel[]>([]);
   const [stats, setStats] = useState<TokenStats | null>(null);
   const [tokenLogs, setTokenLogs] = useState<TokenLog[]>([]);
@@ -502,6 +503,26 @@ export default function App() {
       });
     }
   }, [currentChapter?.content, isGenerating, isSegmenting, isBatchGenerating]);
+
+  useEffect(() => {
+    if (currentChapter) {
+      lastSavedContentRef.current = currentChapter.content || "";
+    }
+  }, [currentChapter?.id]);
+
+  // Auto-save logic
+  useEffect(() => {
+    if (!currentChapter || isGenerating || isWriting || isSegmenting || isBatchGenerating) return;
+    
+    // Only auto-save if content has changed
+    if (currentChapter.content === lastSavedContentRef.current) return;
+
+    const timer = setTimeout(() => {
+      handleSaveChapter(true);
+    }, 10000); // Auto-save after 10 seconds of inactivity
+
+    return () => clearTimeout(timer);
+  }, [currentChapter?.content, currentChapter?.title, currentChapter?.summary]);
 
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
     const saved = localStorage.getItem("inkflow_ai_config");
@@ -1158,29 +1179,46 @@ export default function App() {
     }
   };
 
-  const handleSaveChapter = async () => {
-    if (!currentChapter || !selectedNovel) return;
+  const handleSaveChapter = async (isAuto = false, updatedChapter?: Chapter) => {
+    const chapterToSave = updatedChapter || currentChapter;
+    if (!chapterToSave || !selectedNovel) return;
+    
+    // If auto-saving, check if content actually changed
+    if (isAuto && chapterToSave.content === lastSavedContentRef.current) return;
+
     setIsSaving(true);
     
     try {
-      const res = await fetch(`/api/chapters/${currentChapter.id}`, {
+      const res = await fetch(`/api/chapters/${chapterToSave.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          content: currentChapter.content,
-          title: currentChapter.title,
-          summary: currentChapter.summary
+          content: chapterToSave.content,
+          title: chapterToSave.title,
+          summary: chapterToSave.summary
         }),
       });
       if (!res.ok) throw new Error(t.saveError || "Failed to save chapter");
       
-      // Update local chapters list
-      setChapters(prev => prev.map(ch => ch.id === currentChapter.id ? { ...ch, ...currentChapter } : ch));
+      // Save version if it's a manual save or if content changed significantly
+      if (chapterToSave.content !== lastSavedContentRef.current) {
+        await saveChapterVersion(chapterToSave.id);
+      }
       
+      // Update local chapters list
+      setChapters(prev => prev.map(ch => ch.id === chapterToSave.id ? { ...ch, ...chapterToSave } : ch));
+      
+      lastSavedContentRef.current = chapterToSave.content || "";
       setLastSavedAt(new Date());
+      
+      if (!isAuto) {
+        setToast({ message: t.saveSuccess || "Saved successfully", type: 'success' });
+      }
     } catch (error: any) {
       console.error("Error saving chapter:", error);
-      setToast({ message: error.message || "Failed to save chapter", type: 'error' });
+      if (!isAuto) {
+        setToast({ message: error.message || "Failed to save chapter", type: 'error' });
+      }
     } finally {
       setIsSaving(false);
     }
@@ -1689,10 +1727,14 @@ export default function App() {
 
   const fetchChapterVersions = async (chapterId: number) => {
     try {
+      console.log(`Fetching versions for chapter: ${chapterId}`);
       const res = await fetch(`/api/chapters/${chapterId}/versions`);
       if (res.ok) {
         const data = await res.json();
+        console.log(`Fetched ${data.length} versions for chapter: ${chapterId}`);
         setChapterVersions(data);
+      } else {
+        console.error("Failed to fetch chapter versions, status:", res.status);
       }
     } catch (e) {
       console.error("Failed to fetch versions:", e);
@@ -1703,10 +1745,14 @@ export default function App() {
     if (isSavingVersion) return;
     setIsSavingVersion(true);
     try {
+      console.log(`Saving version for chapter: ${chapterId}`);
       const res = await fetch(`/api/chapters/${chapterId}/versions`, { method: 'POST' });
       if (res.ok) {
+        console.log(`Version saved for chapter: ${chapterId}`);
         await fetchChapterVersions(chapterId);
         setToast({ message: t.versionSaved, type: 'success' });
+      } else {
+        console.error("Failed to save version, status:", res.status);
       }
     } catch (e) {
       console.error("Failed to save version:", e);
@@ -2776,7 +2822,7 @@ export default function App() {
                     {t.previewNovel}
                   </button>
                   <button 
-                    onClick={handleSaveChapter}
+                    onClick={() => handleSaveChapter()}
                     className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex items-center gap-2 transition-all"
                   >
                     <Save size={18} />
@@ -4941,27 +4987,16 @@ export default function App() {
                   ? (currentChapter.content || "") + "\n\n" + content 
                   : content;
 
-                setCurrentChapter({ ...currentChapter, content: newContent });
+                const updated = { ...currentChapter, content: newContent };
+                setCurrentChapter(updated);
                 
-                // Also save to database
-                try {
-                  const res = await fetch(`/api/chapters/${currentChapter.id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ content: newContent }),
-                  });
-                  
-                  if (res.ok) {
-                    await fetchNovelDetails(selectedNovel.id, currentChapter.id);
-                    setToast({ 
-                      message: ((mode === 'append' ? (t as any).append : (t as any).replace) || t.completed) + " " + t.completed, 
-                      type: 'success' 
-                    });
-                  }
-                } catch (error) {
-                  console.error("Failed to update chapter:", error);
-                  setToast({ message: (t as any).updateError || "Failed to update chapter", type: 'error' });
-                }
+                // Use handleSaveChapter to save and update lastSavedContentRef
+                await handleSaveChapter(false, updated);
+                
+                setToast({ 
+                  message: ((mode === 'append' ? (t as any).append : (t as any).replace) || t.completed) + " " + t.completed, 
+                  type: 'success' 
+                });
               }
             }}
           />

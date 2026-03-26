@@ -39,10 +39,14 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({
 
   const fetchHistory = async () => {
     try {
+      console.log(`Fetching history for novel: ${novel.id}`);
       const res = await fetch(`/api/novels/${novel.id}/plot-assistant-messages`);
       if (res.ok) {
         const data = await res.json();
+        console.log(`Fetched ${data.length} messages for novel: ${novel.id}`);
         setMessages(data.map((m: any) => ({ role: m.role, content: m.content })));
+      } else {
+        console.error("Failed to fetch history, status:", res.status);
       }
     } catch (e) {
       console.error("Failed to fetch history:", e);
@@ -77,11 +81,17 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({
 
   const saveMessage = async (role: 'user' | 'assistant', content: string) => {
     try {
-      await fetch(`/api/novels/${novel.id}/plot-assistant-messages`, {
+      console.log(`Saving message for novel: ${novel.id}, role: ${role}`);
+      const res = await fetch(`/api/novels/${novel.id}/plot-assistant-messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role, content })
       });
+      if (!res.ok) {
+        console.error("Failed to save message, status:", res.status);
+      } else {
+        console.log("Message saved successfully");
+      }
     } catch (e) {
       console.error("Failed to save message:", e);
     }
