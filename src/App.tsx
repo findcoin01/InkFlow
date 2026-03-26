@@ -4932,19 +4932,36 @@ export default function App() {
             language={lang}
             onClose={() => setIsPlotAssistantOpen(false)} 
             currentChapter={currentChapter}
-            onUpdateChapter={(content) => {
+            onUpdateChapter={async (content, mode = 'replace') => {
               if (currentChapter) {
-                saveChapterVersion(currentChapter.id);
-                setCurrentChapter({ ...currentChapter, content });
+                // Ensure version is saved before modification
+                await saveChapterVersion(currentChapter.id);
+                
+                const newContent = mode === 'append' 
+                  ? (currentChapter.content || "") + "\n\n" + content 
+                  : content;
+
+                setCurrentChapter({ ...currentChapter, content: newContent });
+                
                 // Also save to database
-                fetch(`/api/chapters/${currentChapter.id}`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ content }),
-                }).then(() => {
-                  fetchNovelDetails(selectedNovel.id, currentChapter.id);
-                  setToast({ message: t.applyToChapter + " " + t.completed, type: 'success' });
-                });
+                try {
+                  const res = await fetch(`/api/chapters/${currentChapter.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content: newContent }),
+                  });
+                  
+                  if (res.ok) {
+                    await fetchNovelDetails(selectedNovel.id, currentChapter.id);
+                    setToast({ 
+                      message: ((mode === 'append' ? (t as any).append : (t as any).replace) || t.completed) + " " + t.completed, 
+                      type: 'success' 
+                    });
+                  }
+                } catch (error) {
+                  console.error("Failed to update chapter:", error);
+                  setToast({ message: (t as any).updateError || "Failed to update chapter", type: 'error' });
+                }
               }
             }}
           />

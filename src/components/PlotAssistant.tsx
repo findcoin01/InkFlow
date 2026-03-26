@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Loader2, Sparkles, X } from 'lucide-react';
+import { Send, Bot, User, Loader2, Sparkles, X, Plus, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { LangChainService } from '../services/langchainService';
@@ -16,7 +16,7 @@ interface PlotAssistantProps {
   onClose: () => void;
   language: string;
   currentChapter?: any;
-  onUpdateChapter?: (content: string) => void;
+  onUpdateChapter?: (content: string, mode?: 'append' | 'replace') => void;
 }
 
 export const PlotAssistant: React.FC<PlotAssistantProps> = ({ 
@@ -250,18 +250,27 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({
                   </div>
                   
                   {msg.role === 'assistant' && onUpdateChapter && currentChapter && (
-                    <div className="flex justify-start">
+                    <div className="flex justify-start gap-2">
                       {(() => {
                         const code = extractCodeBlock(msg.content);
                         if (!code) return null;
                         return (
-                          <button
-                            onClick={() => onUpdateChapter(code)}
-                            className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold uppercase tracking-widest flex items-center gap-1 bg-emerald-500/5 px-2 py-1 rounded border border-emerald-500/10"
-                          >
-                            <Sparkles size={10} />
-                            {language === 'zh' ? "应用到章节" : "Apply to Chapter"}
-                          </button>
+                          <>
+                            <button
+                              onClick={() => onUpdateChapter(code, 'append')}
+                              className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold uppercase tracking-widest flex items-center gap-1 bg-emerald-500/5 px-2 py-1 rounded border border-emerald-500/10 transition-all"
+                            >
+                              <Plus size={10} />
+                              {language === 'zh' ? "追加" : "Append"}
+                            </button>
+                            <button
+                              onClick={() => onUpdateChapter(code, 'replace')}
+                              className="text-[10px] text-zinc-400 hover:text-white font-bold uppercase tracking-widest flex items-center gap-1 bg-zinc-800/50 px-2 py-1 rounded border border-zinc-700/50 transition-all"
+                            >
+                              <RefreshCw size={10} />
+                              {language === 'zh' ? "替换" : "Replace"}
+                            </button>
+                          </>
                         );
                       })()}
                     </div>
