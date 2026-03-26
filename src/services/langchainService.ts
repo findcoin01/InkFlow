@@ -17,6 +17,12 @@ import { AIConfig, WritingConfig } from "../types";
 export class LangChainService {
   private static memories: Record<string, BufferMemory> = {};
 
+  static clearMemory(novelId: string) {
+    if (this.memories[novelId]) {
+      delete this.memories[novelId];
+    }
+  }
+
   private static getModel(config: AIConfig, signal?: AbortSignal) {
     const normalizedConfig = {
       ...config,
@@ -170,13 +176,25 @@ export class LangChainService {
     context: string,
     config: AIConfig,
     language: string = 'zh',
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    initialHistory?: { role: string, content: string }[]
   ) {
     if (!this.memories[novelId]) {
       this.memories[novelId] = new BufferMemory({
         returnMessages: true,
         memoryKey: "history"
       });
+      
+      // Load initial history if provided
+      if (initialHistory && initialHistory.length > 0) {
+        for (const msg of initialHistory) {
+          if (msg.role === 'user') {
+            await this.memories[novelId].chatHistory.addUserMessage(msg.content);
+          } else {
+            await this.memories[novelId].chatHistory.addAIMessage(msg.content);
+          }
+        }
+      }
     }
 
     const model = this.getModel(config, signal);
@@ -189,7 +207,11 @@ export class LangChainService {
 小说背景和当前进度：
 {context}
 
-请基于上述背景和作者的提问，提供有创意的建议、逻辑检查或情节构思。`;
+请基于上述背景和作者的提问，提供有创意的建议、逻辑检查或情节构思。
+
+重要提示：
+1. 如果你提供了可以直接替换或插入到小说中的文本段落，请务必将其包裹在代码块中（例如 \`\`\` 文本内容 \`\`\`），这样作者可以一键应用你的建议。
+2. 保持对话的连贯性，参考之前的对话记录。`;
 
     const chatPrompt = ChatPromptTemplate.fromMessages([
       SystemMessagePromptTemplate.fromTemplate(systemTemplate),

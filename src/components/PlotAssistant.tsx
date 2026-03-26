@@ -54,6 +54,8 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({
     try {
       await fetch(`/api/novels/${novel.id}/plot-assistant-messages`, { method: 'DELETE' });
       setMessages([]);
+      // Also clear in-memory LangChain memory if exists
+      LangChainService.clearMemory(novel.id.toString());
     } catch (e) {
       console.error("Failed to clear history:", e);
     }
@@ -115,7 +117,8 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({
         context,
         aiConfig,
         language,
-        abortControllerRef.current.signal
+        abortControllerRef.current.signal,
+        messages // Pass current messages as initial history
       );
 
       let fullContent = "";
@@ -159,8 +162,9 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({
   };
 
   const extractCodeBlock = (text: string) => {
-    const match = text.match(/```(?:[\w]*)\n([\s\S]*?)```/);
-    return match ? match[1] : null;
+    // More flexible regex to handle code blocks with or without language identifier and with or without newline
+    const match = text.match(/```(?:[\w]*)\n?([\s\S]*?)```/);
+    return match ? match[1].trim() : null;
   };
 
   return (
@@ -247,16 +251,19 @@ export const PlotAssistant: React.FC<PlotAssistantProps> = ({
                   
                   {msg.role === 'assistant' && onUpdateChapter && currentChapter && (
                     <div className="flex justify-start">
-                      <button
-                        onClick={() => {
-                          const code = extractCodeBlock(msg.content);
-                          onUpdateChapter(code || msg.content);
-                        }}
-                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold uppercase tracking-widest flex items-center gap-1 bg-emerald-500/5 px-2 py-1 rounded border border-emerald-500/10"
-                      >
-                        <Sparkles size={10} />
-                        {language === 'zh' ? "应用到章节" : "Apply to Chapter"}
-                      </button>
+                      {(() => {
+                        const code = extractCodeBlock(msg.content);
+                        if (!code) return null;
+                        return (
+                          <button
+                            onClick={() => onUpdateChapter(code)}
+                            className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold uppercase tracking-widest flex items-center gap-1 bg-emerald-500/5 px-2 py-1 rounded border border-emerald-500/10"
+                          >
+                            <Sparkles size={10} />
+                            {language === 'zh' ? "应用到章节" : "Apply to Chapter"}
+                          </button>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
