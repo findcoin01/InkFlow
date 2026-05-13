@@ -58,11 +58,15 @@ export interface TokenStats {
 export type AIProvider = 'gemini' | 'openai' | 'deepseek' | 'custom';
 
 export interface AIConfig {
+  id?: number;
   provider: AIProvider;
   model: string;
-  apiKey?: string;
-  baseUrl?: string;
+  api_key?: string;
+  base_url?: string;
+  apiKey?: string; // Legacy
+  baseUrl?: string; // Legacy
   parameters?: string; // JSON string
+  is_active?: number;
 }
 
 export type ContentLayout = 'standard' | 'web' | 'traditional';
@@ -92,6 +96,8 @@ export interface Prompt {
   is_default: number;
   created_at: string;
 }
+
+export type PromptTemplate = Prompt;
 
 export interface OperationLog {
   id: number;
@@ -126,6 +132,18 @@ export interface ScheduledTask {
   novel_title?: string;
   chapter_title?: string;
   platform_name?: string;
+}
+
+export type Language = 'en' | 'zh';
+
+export type Task = ScheduledTask;
+export type Log = OperationLog;
+
+export interface ChapterVersion {
+  id: number;
+  chapter_id: number;
+  content: string;
+  created_at: string;
 }
 
 export interface TokenLog {

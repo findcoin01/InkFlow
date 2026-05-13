@@ -57,78 +57,44 @@ import {
 } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
 import { cn, formatDate } from "./lib/utils";
-import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout, Platform, ScheduledTask, Prompt, OperationLog, AIConfigDetail, TokenLog } from "./types";
-import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, generateChapterTitleFromOutline, extractNovelMetadata, generateChapterSummary, generateNovelDescription, refactorWorldSetting } from "./services/aiService";
-import Markdown from "react-markdown";
+import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, ContentLayout, Platform, ScheduledTask, Prompt, OperationLog, AIConfigDetail, TokenLog, Language } from "./types";
+import { translations } from "./constants";
 import remarkGfm from "remark-gfm";
-import { translations, Language } from "./constants";
-import Logo from "./components/Logo";
+import Markdown from "react-markdown";
+
+// Page Components
+import Dashboard from "./pages/Dashboard";
+import NovelsPage from "./pages/NovelsPage";
+import EditorPage from "./pages/EditorPage";
+import WorldBuildingPage from "./pages/WorldBuildingPage";
+import StatsPage from "./pages/StatsPage";
+import TasksPage from "./pages/TasksPage";
+import PromptsPage from "./pages/PromptsPage";
+import LogsPage from "./pages/LogsPage";
+import AIConfigPage from "./pages/AIConfigPage";
+import SettingsPage from "./pages/SettingsPage";
+
+// UI Components
+import SidebarItem from "./components/ui/SidebarItem";
+import Card from "./components/ui/Card";
+import StatCard from "./components/ui/StatCard";
+import Toast from "./components/ui/Toast";
+import TemplateSelector from "./components/ui/TemplateSelector";
+import TOCItem from "./components/ui/TOCItem";
+import StructuredContent from "./components/ui/StructuredContent";
 import PlotAssistant from "./components/PlotAssistant";
+import Logo from "./components/Logo";
+
+import TaskModal from "./components/modals/TaskModal";
+import PromptModal from "./components/modals/PromptModal";
+import OutlinePreviewModal from "./components/modals/OutlinePreviewModal";
+import HistoryModal from "./components/modals/HistoryModal";
+
+import { useInkFlow } from "./hooks/useInkFlow";
+
+import { generateAIContent, generateAIOutline, generateAIContentStream, generateChapterTitle, generateChapterTitleFromOutline, extractNovelMetadata, generateChapterSummary, generateNovelDescription, refactorWorldSetting } from "./services/aiService";
 
 // --- Components ---
-
-const SidebarItem = ({ icon: Icon, label, active, onClick, collapsed, className }: any) => (
-  <button
-    onClick={onClick}
-    title={collapsed ? label : ""}
-    className={cn(
-      "flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-200",
-      active 
-        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
-        : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200",
-      collapsed && "justify-center px-0",
-      className
-    )}
-  >
-    <Icon size={20} className="shrink-0" />
-    {!collapsed && <span className="font-medium truncate">{label}</span>}
-  </button>
-);
-
-const Card = ({ children, className, title, headerAction, onClick }: any) => (
-  <div 
-    onClick={onClick}
-    className={cn("bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6", className)}
-  >
-    {title && (
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-zinc-100">{title}</h3>
-        {headerAction}
-      </div>
-    )}
-    {children}
-  </div>
-);
-
-const StatCard = ({ label, value, icon: Icon, trend, t }: any) => (
-  <Card className="flex items-center justify-between">
-    <div>
-      <p className="text-sm text-zinc-400 mb-1">{label}</p>
-      <h4 className="text-2xl font-bold text-zinc-100">{value}</h4>
-      {trend !== undefined && (
-        <p className={cn(
-          "text-xs mt-1 flex items-center gap-1", 
-          typeof trend === 'number' ? (trend > 0 ? "text-emerald-400" : trend < 0 ? "text-rose-400" : "text-zinc-500") : "text-zinc-500"
-        )}>
-          {typeof trend === 'number' ? (
-            <>
-              <TrendingUp size={12} className={trend < 0 ? "rotate-180" : ""} />
-              {Math.abs(trend)}% {t.fromLastWeek}
-            </>
-          ) : (
-            <>
-              <Clock size={12} />
-              {trend}
-            </>
-          )}
-        </p>
-      )}
-    </div>
-    <div className="p-3 bg-zinc-800 rounded-xl text-emerald-400">
-      <Icon size={24} />
-    </div>
-  </Card>
-);
 
 const ChapterPreview = React.memo(({ ch, idx, t }: { ch: Chapter, idx: number, t: any }) => {
   const [isVisible, setIsVisible] = useState(false);
@@ -178,175 +144,6 @@ const ChapterPreview = React.memo(({ ch, idx, t }: { ch: Chapter, idx: number, t
     </div>
   );
 });
-
-const TOCItem = React.memo(({ ch, idx, onScrollTo }: { ch: Chapter, idx: number, onScrollTo: (id: number) => void }) => (
-  <button
-    onClick={() => onScrollTo(ch.id)}
-    className="w-full text-left px-3 py-2 rounded-lg text-sm text-zinc-400 hover:bg-zinc-800 hover:text-white transition-all truncate"
-  >
-    <span className="text-zinc-600 mr-2">{idx + 1}.</span>
-    {ch.title}
-  </button>
-));
-
-const StructuredContent = ({ content, placeholder }: { content: string, placeholder: string }) => {
-  if (!content) return <p className="text-zinc-500 italic text-sm">{placeholder}</p>;
-
-  try {
-    const data = JSON.parse(content);
-    
-    // Handle Array (likely Characters)
-    if (Array.isArray(data)) {
-      return (
-        <div className="space-y-4">
-          {data.map((item: any, idx: number) => (
-            <div key={idx} className="p-4 bg-zinc-800/50 rounded-xl border border-zinc-700/50 hover:border-emerald-500/30 transition-all">
-              {Object.entries(item).map(([key, value]: [string, any]) => (
-                <div key={key} className="mb-2 last:mb-0">
-                  <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider block mb-1">{key}</span>
-                  <p className="text-sm text-zinc-300 leading-relaxed">
-                    {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      );
-    }
-
-    // Handle Object (World Setting, Storylines)
-    if (typeof data === 'object' && data !== null) {
-      return (
-        <div className="space-y-6">
-          {Object.entries(data).map(([key, value]: [string, any]) => (
-            <div key={key}>
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-1 h-4 bg-emerald-500 rounded-full" />
-                <h5 className="text-xs font-bold text-white uppercase tracking-widest">{key.replace(/_/g, ' ')}</h5>
-              </div>
-              <div className="pl-3 border-l border-zinc-800 ml-0.5">
-                {Array.isArray(value) ? (
-                  <ul className="list-disc list-inside space-y-1">
-                    {value.map((v: any, i: number) => (
-                      <li key={i} className="text-sm text-zinc-400 leading-relaxed">
-                        {typeof v === 'object' ? JSON.stringify(v) : String(v)}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-zinc-400 leading-relaxed">
-                    {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                  </p>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      );
-    }
-  } catch (e) {
-    // Not JSON, fallback to Markdown
-  }
-
-  return (
-    <div className="markdown-body">
-      <Markdown remarkPlugins={[remarkGfm]}>
-        {content || `*${placeholder}*`}
-      </Markdown>
-    </div>
-  );
-};
-
-const TemplateSelector = ({ 
-  type, 
-  prompts, 
-  selectedId, 
-  onSelect, 
-  onDelete,
-  t 
-}: { 
-  type: string, 
-  prompts: any[], 
-  selectedId?: number, 
-  onSelect: (id: number) => void,
-  onDelete: (id: number) => void,
-  t: any 
-}) => {
-  const filtered = prompts.filter(p => p.type === type);
-  const activePrompt = filtered.find(p => p.id === selectedId) || filtered.find(p => p.is_default === 1);
-
-  const getTypeIcon = () => {
-    switch(type) {
-      case 'chapter': return <BookOpen size={12} />;
-      case 'outline': return <GitBranch size={12} />;
-      case 'summary': return <FileText size={12} />;
-      case 'refactor': return <Zap size={12} />;
-      default: return <Sparkles size={12} />;
-    }
-  };
-
-  return (
-    <div className="relative group/template">
-      <div className="flex items-center gap-1.5 px-2 py-1.5 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/30 rounded-lg transition-all cursor-pointer group-hover/template:border-zinc-600">
-        <div className="text-emerald-500/60 group-hover/template:text-emerald-400 transition-colors">
-          {getTypeIcon()}
-        </div>
-        <ChevronDown size={10} className="text-zinc-600 group-hover/template:text-zinc-400 transition-colors" />
-      </div>
-      
-      <div className="absolute bottom-full left-0 mb-2 w-64 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl opacity-0 invisible group-hover/template:opacity-100 group-hover/template:visible transition-all z-50 overflow-hidden translate-y-2 group-hover/template:translate-y-0">
-        <div className="p-3 border-b border-zinc-800 bg-zinc-900/80 backdrop-blur-md flex items-center justify-between">
-          <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">{t.prompts}</span>
-          <div className="px-1.5 py-0.5 bg-zinc-800 rounded text-[9px] text-zinc-500 font-mono">
-            {filtered.length}
-          </div>
-        </div>
-        <div className="max-h-64 overflow-y-auto py-2">
-          {filtered.length > 0 ? (
-            filtered.map(p => (
-              <div 
-                key={p.id}
-                className={cn(
-                  "flex items-center justify-between px-4 py-2.5 text-xs transition-all hover:bg-zinc-800/80 cursor-pointer group/item",
-                  (selectedId === p.id || (!selectedId && p.is_default === 1)) ? "text-emerald-400 bg-emerald-500/5" : "text-zinc-400 hover:text-zinc-200"
-                )}
-                onClick={() => onSelect(p.id)}
-              >
-                <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate font-medium">{p.name}</span>
-                    {p.is_default === 1 && (
-                      <span className="text-[8px] px-1 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 uppercase">{t.defaultLabel || "Default"}</span>
-                    )}
-                  </div>
-                  <span className="text-[9px] text-zinc-600 truncate opacity-0 group-hover/item:opacity-100 transition-opacity">
-                    {p.content.substring(0, 40)}...
-                  </span>
-                </div>
-                {p.is_default !== 1 && (
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(p.id);
-                    }}
-                    className="p-1.5 text-zinc-600 hover:text-rose-500 hover:bg-rose-500/10 rounded-md opacity-0 group-hover/item:opacity-100 transition-all ml-2"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-              </div>
-            ))
-          ) : (
-            <div className="px-4 py-8 text-center">
-              <p className="text-[10px] text-zinc-600 uppercase tracking-widest">{t.noTemplates || "No templates found"}</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // --- Main App ---
 
@@ -486,7 +283,7 @@ export default function App() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
 
   useEffect(() => {
     if (toast) {
@@ -2476,243 +2273,25 @@ export default function App() {
       <main className="flex-1 overflow-y-auto p-8">
         <AnimatePresence mode="wait">
           {activeTab === "dashboard" && (
-            <motion.div
-              key="dashboard"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="space-y-8"
-            >
-              <header className="flex items-center gap-6">
-                <Logo size={80} className="hidden sm:block" />
-                <div>
-                  <h2 className="text-3xl font-bold text-white mb-2">{t.welcomeBack}</h2>
-                  <p className="text-zinc-500 text-lg">{t.dashboardSub}</p>
-                </div>
-              </header>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <StatCard 
-                  label={t.totalTokens} 
-                  value={stats?.totalTokens.toLocaleString() || "0"} 
-                  icon={Sparkles} 
-                  trend={stats?.tokenTrend} 
-                  t={t}
-                />
-                <StatCard 
-                  label={t.totalViews} 
-                  value={novels.reduce((acc, n) => acc + n.views, 0).toLocaleString()} 
-                  icon={Eye} 
-                  trend={stats?.viewTrend} 
-                  t={t}
-                />
-                <StatCard 
-                  label={t.activeNovels} 
-                  value={novels.length} 
-                  icon={BookMarked} 
-                  t={t}
-                />
-                <StatCard 
-                  label={t.scheduledTasks} 
-                  value={tasks.filter(t => t.status === 'pending').length} 
-                  icon={Calendar} 
-                  trend={tasks.find(t => t.status === 'pending') ? formatDate(tasks.find(t => t.status === 'pending')!.scheduled_at, 'HH:mm') : undefined}
-                  t={t}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card title={t.tokenConsumption}>
-                  <div className="h-64 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={stats?.dailyTokens.map(d => ({ ...d, date: formatDate(d.date, 'MMM dd') })) || []}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-                        <XAxis dataKey="date" stroke="#71717a" fontSize={12} />
-                        <YAxis stroke="#71717a" fontSize={12} />
-                        <Tooltip 
-                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '8px' }}
-                          itemStyle={{ color: '#10b981' }}
-                        />
-                        <Line type="monotone" dataKey="tokens" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981' }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </Card>
-
-                <Card title={t.recentNovels}>
-                  <div className="space-y-4">
-                    {novels.slice(0, 4).map(novel => (
-                      <div 
-                        key={novel.id} 
-                        onClick={() => fetchNovelDetails(novel.id)}
-                        className="flex items-center justify-between p-4 rounded-xl bg-zinc-800/30 border border-zinc-800 hover:border-emerald-500/50 cursor-pointer transition-all group"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="w-12 h-16 bg-zinc-700 rounded-lg flex items-center justify-center text-zinc-500 overflow-hidden">
-                            {novel.cover_url ? (
-                              <img src={novel.cover_url} alt={novel.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                            ) : (
-                              <BookOpen size={24} />
-                            )}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-semibold text-zinc-100 group-hover:text-emerald-400 transition-colors">{novel.title}</h4>
-                              {novel.genre && (
-                                <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 text-[10px] font-bold rounded uppercase tracking-wider">
-                                  {novel.genre}
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-xs text-zinc-500 mt-1">{novel.chapter_count} {t.chapters} • {novel.total_tokens?.toLocaleString() || 0} {t.tokens}</p>
-                            {novel.target_chapters && (
-                              <div className="w-32 h-1 bg-zinc-800 rounded-full mt-2 overflow-hidden">
-                                <div 
-                                  className="h-full bg-emerald-500"
-                                  style={{ width: `${Math.min((novel.chapter_count / novel.target_chapters) * 100, 100)}%` }}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <ChevronRight size={20} className="text-zinc-600 group-hover:text-emerald-400" />
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              </div>
-            </motion.div>
+            <Dashboard 
+              stats={stats}
+              novels={novels}
+              fetchNovelDetails={fetchNovelDetails}
+              tasks={tasks}
+              t={t}
+            />
           )}
 
           {activeTab === "novels" && (
-            <motion.div
-              key="novels"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-8"
-            >
-              <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-                <div>
-                  <h2 className="text-3xl font-bold text-white mb-2">{t.myNovels}</h2>
-                  <p className="text-zinc-500">{t.manageEmpire}</p>
-                </div>
-                <div className="relative w-full md:w-64">
-                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                  <input 
-                    type="text"
-                    value={novelSearch}
-                    onChange={(e) => setNovelSearch(e.target.value)}
-                    placeholder={t.searchNovels || "Search novels..."}
-                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2.5 pl-10 pr-4 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 transition-all"
-                  />
-                </div>
-              </header>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {novels.filter(n => n.title.toLowerCase().includes(novelSearch.toLowerCase()) || n.genre?.toLowerCase().includes(novelSearch.toLowerCase())).map(novel => (
-                  <Card key={novel.id} className="group hover:border-emerald-500/50 transition-all cursor-pointer relative" onClick={() => fetchNovelDetails(novel.id)}>
-                    <div className="absolute top-4 right-4 flex gap-2 z-10 opacity-0 group-hover:opacity-100 transition-all">
-                      <div className="relative group/export">
-                        <button 
-                          onClick={(e) => e.stopPropagation()}
-                          className="p-2 text-zinc-600 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg"
-                        >
-                          <Download size={16} />
-                        </button>
-                        <div className="absolute right-0 top-full pt-1 w-32 hidden group-hover/export:block z-20">
-                          <div className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); exportNovel(novel, 'markdown'); }}
-                              className="w-full text-left px-3 py-2 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-2"
-                            >
-                              <FileDown size={12} />
-                              Markdown
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); exportNovel(novel, 'epub'); }}
-                              className="w-full text-left px-3 py-2 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 flex items-center gap-2"
-                            >
-                              <BookOpen size={12} />
-                              EPUB
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={(e) => handleDeleteNovel(e, novel.id)}
-                        className="p-2 text-zinc-600 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg"
-                        title={t.deleteNovel}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                    <div className="flex gap-4 mb-4">
-                      <div className="w-20 h-28 bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-600 shadow-xl overflow-hidden">
-                        {novel.cover_url ? (
-                          <img src={novel.cover_url} alt={novel.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                        ) : (
-                          <BookOpen size={40} />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-xl font-bold text-white group-hover:text-emerald-400 transition-colors">{novel.title}</h3>
-                          {novel.genre && (
-                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 text-[10px] font-bold rounded uppercase tracking-wider">
-                              {novel.genre}
-                            </span>
-                          )}
-                        </div>
-                        {novel.author && (
-                          <p className="text-xs text-zinc-400 mt-0.5 flex items-center gap-1">
-                            <User size={10} className="text-zinc-500" />
-                            {novel.author}
-                          </p>
-                        )}
-                        <p className="text-sm text-zinc-500 line-clamp-2 mt-2">{novel.description}</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-800">
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{t.novelStatus}</p>
-                        <p className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full inline-block mt-1", 
-                          novel.status === 'completed' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-zinc-800 text-zinc-400 border border-zinc-700"
-                        )}>
-                          {novel.status === 'completed' ? t.novelCompleted : t.novelDraft}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{t.totalWords}</p>
-                        <p className="text-sm text-zinc-200 font-mono">{(novel.total_words || 0).toLocaleString()}</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 pt-4 mt-2">
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{t.progress}</p>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm text-zinc-200">{novel.chapter_count} {t.chapters}</p>
-                          {novel.target_chapters && (
-                            <span className="text-[10px] text-zinc-500">/ {novel.target_chapters}</span>
-                          )}
-                        </div>
-                        {novel.target_chapters && (
-                          <div className="w-full h-1 bg-zinc-800 rounded-full mt-1 overflow-hidden">
-                            <div 
-                              className="h-full bg-emerald-500"
-                              style={{ width: `${Math.min((novel.chapter_count / novel.target_chapters) * 100, 100)}%` }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{t.views}</p>
-                        <p className="text-sm text-zinc-200">{novel.views.toLocaleString()}</p>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </motion.div>
+            <NovelsPage 
+              novels={novels}
+              novelSearch={novelSearch}
+              setNovelSearch={setNovelSearch}
+              handleDeleteNovel={handleDeleteNovel}
+              exportNovel={exportNovel}
+              fetchNovelDetails={fetchNovelDetails}
+              t={t}
+            />
           )}
 
           {(activeTab === "editor" || activeTab === "world") && selectedNovel && (
@@ -3763,1220 +3342,113 @@ export default function App() {
           )}
 
           {activeTab === "stats" && stats && (
-            <motion.div
-              key="stats"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="space-y-8"
-            >
-              <header>
-                <h2 className="text-3xl font-bold text-white mb-2">{t.analytics}</h2>
-                <p className="text-zinc-500">{t.analyticsSub}</p>
-              </header>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card title={t.tokenUsageByNovel}>
-                  <div className="h-80 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={stats.tokensByNovel}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-                        <XAxis dataKey="title" stroke="#71717a" fontSize={12} />
-                        <YAxis stroke="#71717a" fontSize={12} />
-                        <Tooltip 
-                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '8px' }}
-                          itemStyle={{ color: '#10b981' }}
-                        />
-                        <Bar dataKey="tokens" fill="#10b981" radius={[4, 4, 0, 0]}>
-                          {stats.tokensByNovel.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#10b981' : '#059669'} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </Card>
-
-                <Card title={t.consumptionDistribution}>
-                  <div className="h-80 w-full flex items-center justify-center">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={stats.tokensByNovel}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={60}
-                          outerRadius={100}
-                          paddingAngle={5}
-                          dataKey="tokens"
-                          nameKey="title"
-                        >
-                          {stats.tokensByNovel.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={['#10b981', '#059669', '#065f46', '#064e3b'][index % 4]} />
-                          ))}
-                        </Pie>
-                        <Tooltip 
-                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '8px' }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </Card>
-              </div>
-
-              <Card 
-                title={t.tokenHistoryLog}
-                headerAction={
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-zinc-500">{t.total}: {tokenLogTotal}</span>
-                    <div className="flex items-center gap-1 ml-4">
-                      <button 
-                        onClick={() => fetchTokenLogs(tokenLogPage - 1)}
-                        disabled={tokenLogPage <= 1}
-                        className="p-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-all"
-                      >
-                        <ChevronRight size={14} className="rotate-180" />
-                      </button>
-                      <span className="text-xs text-zinc-400 px-2">
-                        {tokenLogPage} / {tokenLogTotalPages}
-                      </span>
-                      <button 
-                        onClick={() => fetchTokenLogs(tokenLogPage + 1)}
-                        disabled={tokenLogPage >= tokenLogTotalPages}
-                        className="p-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition-all"
-                      >
-                        <ChevronRight size={14} />
-                      </button>
-                    </div>
-                  </div>
-                }
-              >
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
-                        <th className="px-4 py-3 font-bold">{t.novel}</th>
-                        <th className="px-4 py-3 font-bold">{t.chapters}</th>
-                        <th className="px-4 py-3 font-bold">{t.date}</th>
-                        <th className="px-4 py-3 font-bold">{t.tokens}</th>
-                        <th className="px-4 py-3 font-bold">{t.type}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-800">
-                      {tokenLogs.length > 0 ? (
-                        tokenLogs.map(log => (
-                          <tr key={log.id} className="text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
-                            <td className="px-4 py-4 font-medium">{log.novel_title || t.unknown}</td>
-                            <td className="px-4 py-4 text-zinc-500">{log.chapter_title || "-"}</td>
-                            <td className="px-4 py-4 text-zinc-500">{formatDate(log.created_at, 'yyyy-MM-dd HH:mm:ss')}</td>
-                            <td className="px-4 py-4 text-emerald-400 font-mono">{log.tokens?.toLocaleString() || 0}</td>
-                            <td className="px-4 py-4">
-                              <span className={cn(
-                                "px-2 py-1 text-[10px] rounded-full border",
-                                log.type === 'generation'
-                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                  : log.type === 'supplement'
-                                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                  : log.type === 'description'
-                                  ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
-                                  : log.type === 'generate_outline'
-                                  ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
-                                  : log.type === 'refactor'
-                                  ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                                  : log.type === 'editing'
-                                  ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
-                                  : log.type === 'plot_assistant'
-                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                  : "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                              )}>
-                                {log.type === 'generation' ? t.generateChapter : 
-                                 log.type === 'supplement' ? t.aiSupplement : 
-                                 log.type === 'description' ? t.typeDescription : 
-                                 log.type === 'generate_outline' ? t.typeOutline : 
-                                 log.type === 'refactor' ? t.typeRefactor :
-                                 log.type === 'summary' ? t.summary :
-                                 log.type === 'title' ? t.generateTitle :
-                                 log.type === 'novel_update' ? t.novelUpdate :
-                                 log.type === 'editing' ? t.polish :
-                                 log.type === 'plot_assistant' ? t.plotAssistant :
-                                 t.polish}
-                              </span>
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={5} className="px-4 py-8 text-center text-zinc-600">
-                            {t.noLogs || "No history logs found."}
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-            </motion.div>
+            <StatsPage 
+              stats={stats} 
+              tokenLogs={tokenLogs} 
+              tokenLogPage={tokenLogPage} 
+              tokenLogTotal={tokenLogTotal} 
+              tokenLogTotalPages={tokenLogTotalPages} 
+              fetchTokenLogs={fetchTokenLogs} 
+              t={t} 
+            />
           )}
 
           {activeTab === "tasks" && (
-            <motion.div
-              key="tasks"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="space-y-8"
-            >
-              <header className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-3xl font-bold text-white mb-2">{t.scheduledTasks}</h2>
-                  <p className="text-zinc-500">{t.tasksDesc || "Manage your automated generation tasks."}</p>
-                </div>
-                <button 
-                  onClick={() => setShowTaskModal(true)}
-                  className="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl flex items-center gap-2 transition-all"
-                >
-                  <Plus size={20} />
-                  {t.scheduleTask}
-                </button>
-              </header>
-
-              <div className="grid grid-cols-1 gap-6">
-                <Card title={t.scheduledTasks}>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead>
-                        <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
-                          <th className="px-4 py-3 font-bold">{t.taskType}</th>
-                          <th className="px-4 py-3 font-bold">{t.novel}</th>
-                          <th className="px-4 py-3 font-bold">{t.scheduleTime}</th>
-                          <th className="px-4 py-3 font-bold">{t.recurrence}</th>
-                          <th className="px-4 py-3 font-bold">{t.taskStatus}</th>
-                          <th className="px-4 py-3 font-bold text-right">{t.active}</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-800">
-                        {tasks.length === 0 ? (
-                          <tr>
-                            <td colSpan={6} className="px-4 py-8 text-center text-zinc-500 italic">
-                              {t.noTasks}
-                            </td>
-                          </tr>
-                        ) : (
-                          tasks.map(task => (
-                            <tr key={task.id} className="text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
-                              <td className="px-4 py-4">
-                                <div className="flex items-center gap-2">
-                                  {task.type === 'generate' ? (
-                                    <>
-                                      <Sparkles size={14} className="text-emerald-400" />
-                                      <span className="font-medium">{t.generateChapter}</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Send size={14} className="text-blue-400" />
-                                      <span className="font-medium">{t.mockPublish || "模拟发布"}</span>
-                                    </>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="px-4 py-4">
-                                <p className="font-medium text-zinc-200">{task.novel_title || '-'}</p>
-                                {task.chapter_title && <p className="text-xs text-zinc-500">{task.chapter_title}</p>}
-                              </td>
-                              <td className="px-4 py-4 text-zinc-400">
-                                <div className="flex items-center gap-1.5">
-                                  <Clock size={12} />
-                                  {formatDate(task.scheduled_at, 'yyyy-MM-dd HH:mm')}
-                                </div>
-                              </td>
-                              <td className="px-4 py-4">
-                                <span className={cn(
-                                  "px-2 py-0.5 text-[10px] rounded-full border",
-                                  task.recurrence === 'daily' 
-                                    ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
-                                    : "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
-                                )}>
-                                  {task.recurrence === 'daily' ? t.recurrenceDaily : t.recurrenceOnce}
-                                </span>
-                              </td>
-                              <td className="px-4 py-4">
-                                <span className={cn(
-                                  "px-2 py-0.5 text-[10px] rounded-full border",
-                                  task.status === 'pending' && "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
-                                  task.status === 'running' && "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 animate-pulse",
-                                  task.status === 'completed' && "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-                                  task.status === 'failed' && "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                                )}>
-                                  {t[task.status]}
-                                </span>
-                                {task.error && <p className="text-[10px] text-rose-400 mt-1 max-w-[200px] truncate" title={task.error}>{task.error}</p>}
-                              </td>
-                              <td className="px-4 py-4 text-right">
-                                <div className="flex items-center justify-end gap-1">
-                                  {task.status === 'pending' && (
-                                    <button 
-                                      onClick={() => handleRunTask(task.id)}
-                                      className="p-2 text-zinc-500 hover:text-emerald-400 transition-colors"
-                                      title={t.runNow}
-                                    >
-                                      <Play size={16} />
-                                    </button>
-                                  )}
-                                  <button 
-                                    onClick={() => handleDeleteTask(task.id)}
-                                    className="p-2 text-zinc-500 hover:text-rose-400 transition-colors"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
-              </div>
-            </motion.div>
+            <TasksPage 
+              tasks={tasks}
+              novels={novels}
+              setShowTaskModal={setShowTaskModal}
+              handleDeleteTask={handleDeleteTask}
+              handleRunTask={handleRunTask}
+              t={t}
+            />
           )}
 
           {activeTab === "prompts" && (
-            <motion.div
-              key="prompts"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-8"
-            >
-              <header className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-3xl font-bold text-white mb-2">{t.prompts}</h2>
-                  <p className="text-zinc-500">{t.promptsDesc}</p>
-                </div>
-                <button 
-                  onClick={() => {
-                    setEditingPrompt({ name: '', content: '', type: promptFilter === 'all' ? 'chapter' : promptFilter as any, is_default: 0 });
-                    setShowPromptModal(true);
-                  }}
-                  className="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
-                >
-                  <Plus size={20} />
-                  {t.addPrompt}
-                </button>
-              </header>
-
-              <div className="flex items-center gap-2 p-1 bg-zinc-900/50 border border-zinc-800 rounded-xl w-fit">
-                {['all', 'chapter', 'outline', 'summary', 'description', 'refactor', 'polish'].map((filter) => (
-                  <button
-                    key={filter}
-                    onClick={() => setPromptFilter(filter)}
-                    className={cn(
-                      "px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                      promptFilter === filter 
-                        ? "bg-zinc-800 text-white shadow-sm" 
-                        : "text-zinc-500 hover:text-zinc-300"
-                    )}
-                  >
-                    {filter === 'all' ? t.all : 
-                     filter === 'chapter' ? t.typeChapter : 
-                     filter === 'outline' ? t.typeOutline : 
-                     filter === 'summary' ? t.typeSummary : 
-                     filter === 'description' ? t.typeDescription : 
-                     filter === 'refactor' ? t.typeRefactor : t.typePolish}
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {prompts
-                  .filter(p => promptFilter === 'all' || p.type === promptFilter)
-                  .map(prompt => (
-                  <div 
-                    key={prompt.id} 
-                    className="group relative bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-6 hover:border-zinc-700 transition-all hover:shadow-xl hover:shadow-black/20"
-                  >
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-lg font-bold text-white group-hover:text-emerald-400 transition-colors">{prompt.name}</h4>
-                          {prompt.is_default === 1 && (
-                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold uppercase tracking-wider rounded border border-emerald-500/20">
-                              {t.isDefault}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
-                          {prompt.type === 'chapter' ? t.typeChapter : 
-                           prompt.type === 'outline' ? t.typeOutline : 
-                           prompt.type === 'summary' ? t.typeSummary : 
-                           prompt.type === 'description' ? t.typeDescription : 
-                           prompt.type === 'refactor' ? t.typeRefactor : t.typePolish}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {prompt.is_default !== 1 && (
-                          <button 
-                            onClick={() => handleSetDefaultPrompt(prompt.id, prompt.type)}
-                            className="p-2 text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all"
-                            title={t.setAsDefault}
-                          >
-                            <Sparkles size={16} />
-                          </button>
-                        )}
-                        <button 
-                          onClick={() => {
-                            setEditingPrompt(prompt);
-                            setShowPromptModal(true);
-                          }}
-                          className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
-                        >
-                          <Settings size={16} />
-                        </button>
-                        <button 
-                          onClick={() => handleDeletePrompt(prompt.id)}
-                          className="p-2 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <div className="relative">
-                      <div className="bg-black/20 rounded-xl p-4 border border-zinc-800/50 font-mono text-xs text-zinc-400 leading-relaxed max-h-32 overflow-hidden relative">
-                        {prompt.content}
-                        <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-zinc-900/40 to-transparent" />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                
-                {prompts.filter(p => promptFilter === 'all' || p.type === promptFilter).length === 0 && (
-                  <div className="col-span-full py-20 flex flex-col items-center justify-center text-zinc-600 border-2 border-dashed border-zinc-800 rounded-3xl">
-                    <div className="p-4 bg-zinc-900 rounded-full mb-4">
-                      <Plus size={32} />
-                    </div>
-                    <p className="text-lg font-medium mb-2">{t.noTemplates}</p>
-                    <p className="text-sm opacity-60">{t.addFirstPrompt}</p>
-                  </div>
-                )}
-              </div>
-            </motion.div>
+            <PromptsPage 
+              prompts={prompts}
+              promptFilter={promptFilter}
+              setPromptFilter={setPromptFilter}
+              setShowPromptModal={setShowPromptModal}
+              setEditingPrompt={setEditingPrompt}
+              handleSetDefaultPrompt={handleSetDefaultPrompt}
+              handleDeletePrompt={handleDeletePrompt}
+              t={t}
+            />
           )}
 
           {activeTab === "logs" && (
-            <motion.div
-              key="logs"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-8"
-            >
-              <header>
-                <h2 className="text-3xl font-bold text-white mb-2">{t.logs}</h2>
-                <p className="text-zinc-500">{t.logsDesc}</p>
-              </header>
-
-              <Card>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="text-left border-b border-zinc-800">
-                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.action}</th>
-                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.details}</th>
-                        <th className="px-4 py-3 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.time}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-800/50">
-                      {logs.map(log => (
-                        <tr key={log.id} className="text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
-                          <td className="px-4 py-4">
-                            <span className="font-mono text-emerald-400">{log.action}</span>
-                          </td>
-                          <td className="px-4 py-4">
-                            <p className="text-xs text-zinc-500 max-w-md truncate">{log.details}</p>
-                          </td>
-                          <td className="px-4 py-4 text-zinc-400 text-xs">
-                            {formatDate(log.created_at, 'yyyy-MM-dd HH:mm:ss')}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {logTotalPages > 1 && (
-                  <div className="p-4 border-t border-zinc-800 flex items-center justify-between">
-                    <div className="text-xs text-zinc-500">
-                      {t.total}: {logTotal}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => fetchLogs(logPage - 1)}
-                        disabled={logPage === 1}
-                        className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-xs font-medium transition-colors"
-                      >
-                        {t.prevPage}
-                      </button>
-                      <span className="text-xs text-zinc-400">
-                        {t.page} {logPage} {t.of} {logTotalPages}
-                      </span>
-                      <button
-                        onClick={() => fetchLogs(logPage + 1)}
-                        disabled={logPage === logTotalPages}
-                        className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-xs font-medium transition-colors"
-                      >
-                        {t.nextPage}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </Card>
-            </motion.div>
+            <LogsPage 
+              logs={logs}
+              logPage={logPage}
+              logTotal={logTotal}
+              logTotalPages={logTotalPages}
+              fetchLogs={fetchLogs}
+              t={t}
+            />
           )}
 
           {activeTab === "ai-config" && (
-            <motion.div
-              key="ai-config"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="max-w-4xl mx-auto space-y-8"
-            >
-              <header>
-                <h2 className="text-3xl font-bold text-white mb-2">{t.aiConfig}</h2>
-                <p className="text-zinc-500">{t.aiConfigDesc}</p>
-              </header>
-
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-                <div className="lg:col-span-1 space-y-2">
-                  {(['gemini', 'openai', 'deepseek', 'custom'] as AIProvider[]).map((p) => {
-                    const isActive = aiConfigs.find(c => c.provider === p)?.is_active === 1;
-                    return (
-                      <button
-                        key={p}
-                        onClick={() => {
-                          setActiveProvider(p);
-                          setTestResult(null);
-                        }}
-                        className={cn(
-                          "w-full py-3 px-4 rounded-xl border transition-all text-left flex items-center justify-between group relative overflow-hidden",
-                          activeProvider === p 
-                            ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.1)]" 
-                            : "bg-zinc-900/50 border-zinc-800 text-zinc-500 hover:border-zinc-700"
-                        )}
-                      >
-                        <div className="flex flex-col">
-                          <span className="font-bold">{t[p]}</span>
-                          {isActive && (
-                            <span className="text-[10px] text-emerald-500/70 font-medium uppercase tracking-wider mt-0.5">
-                              {t.activeAI}
-                            </span>
-                          )}
-                        </div>
-                        {isActive && (
-                          <div className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="lg:col-span-3">
-                  <Card>
-                    <div className="space-y-6">
-                      {/* Provider Config Form */}
-                      {(() => {
-                        const config = aiConfigs.find(c => c.provider === activeProvider) || {
-                          provider: activeProvider,
-                          model: activeProvider === 'gemini' ? 'gemini-3-flash-preview' : (activeProvider === 'openai' ? 'gpt-4o' : (activeProvider === 'deepseek' ? 'deepseek-chat' : '')),
-                          api_key: '',
-                          base_url: activeProvider === 'deepseek' ? "https://api.deepseek.com" : (activeProvider === 'openai' ? "https://api.openai.com/v1" : ""),
-                          parameters: JSON.stringify({ temperature: 0.7, top_p: 0.9, max_tokens: 2000 }),
-                          is_active: 0
-                        };
-
-                        let parsedParams = {};
-                        try {
-                          const parsed = JSON.parse(config.parameters || '{}');
-                          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-                            parsedParams = parsed;
-                          }
-                        } catch (e) {
-                          console.error("Failed to parse AI parameters:", e);
-                        }
-
-                        const params = {
-                          temperature: 0.7,
-                          top_p: 0.9,
-                          top_k: 40,
-                          max_tokens: 4096,
-                          ...parsedParams
-                        };
-
-                        return (
-                          <div className="space-y-6">
-                            <div className="grid grid-cols-2 gap-4">
-                              <div className="space-y-2">
-                                <label className="text-sm font-medium text-zinc-400">{t.model}</label>
-                                <input
-                                  type="text"
-                                  value={config.model || ""}
-                                  onChange={(e) => {
-                                    const newConfigs = aiConfigs.map(c => 
-                                      c.provider === activeProvider ? { ...c, model: e.target.value } : c
-                                    );
-                                    if (!newConfigs.find(c => c.provider === activeProvider)) {
-                                      newConfigs.push({ ...config, model: e.target.value } as any);
-                                    }
-                                    setAiConfigs(newConfigs);
-                                  }}
-                                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <label className="text-sm font-medium text-zinc-400">{t.baseUrl}</label>
-                                <input
-                                  type="text"
-                                  value={config.base_url || ""}
-                                  onChange={(e) => {
-                                    const newConfigs = aiConfigs.map(c => 
-                                      c.provider === activeProvider ? { ...c, base_url: e.target.value } : c
-                                    );
-                                    if (!newConfigs.find(c => c.provider === activeProvider)) {
-                                      newConfigs.push({ ...config, base_url: e.target.value } as any);
-                                    }
-                                    setAiConfigs(newConfigs);
-                                  }}
-                                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                                />
-                              </div>
-                            </div>
-
-                            <div className="space-y-2">
-                              <label className="text-sm font-medium text-zinc-400">{t.apiKey}</label>
-                              <input
-                                type="password"
-                                value={config.api_key || ""}
-                                onChange={(e) => {
-                                  const newConfigs = aiConfigs.map(c => 
-                                    c.provider === activeProvider ? { ...c, api_key: e.target.value } : c
-                                  );
-                                  if (!newConfigs.find(c => c.provider === activeProvider)) {
-                                    newConfigs.push({ ...config, api_key: e.target.value } as any);
-                                  }
-                                  setAiConfigs(newConfigs);
-                                }}
-                                className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all font-mono"
-                              />
-                            </div>
-
-                            <div className="pt-4 border-t border-zinc-800">
-                              <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                                <Activity size={16} className="text-emerald-500" />
-                                {t.advancedParams}
-                              </h4>
-                              <div className="grid grid-cols-2 gap-6">
-                                <div className="space-y-2">
-                                  <div className="flex justify-between">
-                                    <label className="text-xs text-zinc-500">{t.temperature}</label>
-                                    <span className="text-xs text-emerald-400">{params.temperature}</span>
-                                  </div>
-                                  <input 
-                                    type="range" min="0" max="2" step="0.1" 
-                                    value={params.temperature || 0.7}
-                                    onChange={(e) => {
-                                      const newParams = { ...params, temperature: parseFloat(e.target.value) };
-                                      const newConfigs = aiConfigs.map(c => 
-                                        c.provider === activeProvider ? { ...c, parameters: JSON.stringify(newParams) } : c
-                                      );
-                                      if (!newConfigs.find(c => c.provider === activeProvider)) {
-                                        newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
-                                      }
-                                      setAiConfigs(newConfigs);
-                                    }}
-                                    className="w-full accent-emerald-500"
-                                  />
-                                </div>
-                                <div className="space-y-2">
-                                  <div className="flex justify-between">
-                                    <label className="text-xs text-zinc-500">{t.topP}</label>
-                                    <span className="text-xs text-emerald-400">{params.top_p}</span>
-                                  </div>
-                                  <input 
-                                    type="range" min="0" max="1" step="0.05" 
-                                    value={params.top_p || 0.9}
-                                    onChange={(e) => {
-                                      const newParams = { ...params, top_p: parseFloat(e.target.value) };
-                                      const newConfigs = aiConfigs.map(c => 
-                                        c.provider === activeProvider ? { ...c, parameters: JSON.stringify(newParams) } : c
-                                      );
-                                      if (!newConfigs.find(c => c.provider === activeProvider)) {
-                                        newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
-                                      }
-                                      setAiConfigs(newConfigs);
-                                    }}
-                                    className="w-full accent-emerald-500"
-                                  />
-                                </div>
-                                <div className="space-y-2">
-                                  <div className="flex justify-between">
-                                    <label className="text-xs text-zinc-500">{t.maxTokens}</label>
-                                    <span className="text-xs text-emerald-400">{params.max_tokens}</span>
-                                  </div>
-                                  <input 
-                                    type="range" min="100" max="16384" step="100" 
-                                    value={params.max_tokens || 4096}
-                                    onChange={(e) => {
-                                      const newParams = { ...params, max_tokens: parseInt(e.target.value) };
-                                      const newConfigs = aiConfigs.map(c => 
-                                        c.provider === activeProvider ? { ...c, parameters: JSON.stringify(newParams) } : c
-                                      );
-                                      if (!newConfigs.find(c => c.provider === activeProvider)) {
-                                        newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
-                                      }
-                                      setAiConfigs(newConfigs);
-                                    }}
-                                    className="w-full accent-emerald-500"
-                                  />
-                                </div>
-                                <div className="space-y-2">
-                                  <div className="flex justify-between">
-                                    <label className="text-xs text-zinc-500">{t.topK}</label>
-                                    <span className="text-xs text-emerald-400">{params.top_k}</span>
-                                  </div>
-                                  <input 
-                                    type="range" min="1" max="100" step="1" 
-                                    value={params.top_k || 40}
-                                    onChange={(e) => {
-                                      const newParams = { ...params, top_k: parseInt(e.target.value) };
-                                      const newConfigs = aiConfigs.map(c => 
-                                        c.provider === activeProvider ? { ...c, parameters: JSON.stringify(newParams) } : c
-                                      );
-                                      if (!newConfigs.find(c => c.provider === activeProvider)) {
-                                        newConfigs.push({ ...config, parameters: JSON.stringify(newParams) } as any);
-                                      }
-                                      setAiConfigs(newConfigs);
-                                    }}
-                                    className="w-full accent-emerald-500"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center justify-between pt-6 border-t border-zinc-800">
-                              <div className="flex gap-3">
-                                <button 
-                                  onClick={() => handleTestConnection(config)}
-                                  disabled={isTesting}
-                                  className="px-6 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-bold rounded-xl transition-all flex items-center gap-2"
-                                >
-                                  {isTesting ? <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <Zap size={16} />}
-                                  {t.testConnection}
-                                </button>
-                                <button 
-                                  onClick={() => handleSaveAIConfig({ ...config, is_active: 1 })}
-                                  className="px-6 py-2 bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold rounded-xl transition-all"
-                                >
-                                  {t.saveSettings}
-                                </button>
-                              </div>
-                              
-                              {testResult && (
-                                <div className={cn(
-                                  "flex items-center gap-2 text-xs font-medium",
-                                  testResult.success ? "text-emerald-400" : "text-rose-400"
-                                )}>
-                                  {testResult.success ? <Sparkles size={14} /> : <X size={14} />}
-                                  {testResult.message}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </Card>
-                </div>
-              </div>
-            </motion.div>
+            <AIConfigPage 
+              aiConfigs={aiConfigs}
+              activeProvider={activeProvider}
+              setActiveProvider={setActiveProvider}
+              setAiConfigs={setAiConfigs}
+              handleTestConnection={handleTestConnection}
+              handleSaveAIConfig={handleSaveAIConfig}
+              isTesting={isTesting}
+              testResult={testResult}
+              setTestResult={setTestResult}
+              t={t}
+            />
           )}
 
           {activeTab === "settings" && (
-            <motion.div
-              key="settings"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="max-w-2xl mx-auto space-y-8"
-            >
-              <header>
-                <h2 className="text-3xl font-bold text-white mb-2">{t.writingConfig}</h2>
-                <p className="text-zinc-500">{t.aiConfigDesc}</p>
-              </header>
-
-              <Card>
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-zinc-400">{t.author}</label>
-                    <input
-                      type="text"
-                      value={writingConfig.defaultAuthor || ""}
-                      onChange={(e) => setWritingConfig({ ...writingConfig, defaultAuthor: e.target.value })}
-                      placeholder={t.authorPlaceholder}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                    />
-                  </div>
-
-                  <div className="space-y-4">
-                    <label className="text-sm font-medium text-zinc-400">{t.wordCountRange}</label>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <span className="text-[10px] uppercase text-zinc-500 font-bold">{t.minWords}</span>
-                        <input
-                          type="number"
-                          value={writingConfig.minWords ?? ""}
-                          onChange={(e) => setWritingConfig({ ...writingConfig, minWords: parseInt(e.target.value) || 0 })}
-                          className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <span className="text-[10px] uppercase text-zinc-500 font-bold">{t.maxWords}</span>
-                        <input
-                          type="number"
-                          value={writingConfig.maxWords ?? ""}
-                          onChange={(e) => setWritingConfig({ ...writingConfig, maxWords: parseInt(e.target.value) || 0 })}
-                          className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-zinc-800/30 rounded-xl border border-zinc-700/50">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-emerald-500/10 rounded-lg flex items-center justify-center text-emerald-500">
-                        <Type size={20} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-zinc-200">{t.enforceWordCount}</p>
-                        <p className="text-xs text-zinc-500">{t.targetChaptersDesc}</p>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => setWritingConfig({ ...writingConfig, enforceWordCount: !writingConfig.enforceWordCount })}
-                      className={cn(
-                        "w-12 h-6 rounded-full transition-colors relative",
-                        writingConfig.enforceWordCount ? "bg-emerald-500" : "bg-zinc-700"
-                      )}
-                    >
-                      <div className={cn(
-                        "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                        writingConfig.enforceWordCount ? "left-7" : "left-1"
-                      )} />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-zinc-800/30 rounded-xl border border-zinc-700/50">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-emerald-500/10 rounded-lg flex items-center justify-center text-emerald-500">
-                        <FileText size={20} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-zinc-200">{t.autoSummarize}</p>
-                        <p className="text-xs text-zinc-500">{t.autoSummarize}</p>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => setWritingConfig({ ...writingConfig, autoSummarize: !writingConfig.autoSummarize })}
-                      className={cn(
-                        "w-12 h-6 rounded-full transition-colors relative",
-                        writingConfig.autoSummarize ? "bg-emerald-500" : "bg-zinc-700"
-                      )}
-                    >
-                      <div className={cn(
-                        "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                        writingConfig.autoSummarize ? "left-7" : "left-1"
-                      )} />
-                    </button>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-zinc-400">{t.contentLayout}</label>
-                      <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">{t.layoutPreview}</span>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      <div className="grid grid-cols-1 gap-3">
-                        {(['standard', 'web', 'traditional'] as ContentLayout[]).map((l) => (
-                          <button
-                            key={l}
-                            onClick={() => setWritingConfig({ ...writingConfig, layout: l })}
-                            className={cn(
-                              "py-4 px-4 rounded-xl border transition-all text-left group",
-                              writingConfig.layout === l 
-                                ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400" 
-                                : "bg-zinc-800/50 border-zinc-700 text-zinc-500 hover:border-zinc-600"
-                            )}
-                          >
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="text-sm font-bold">{t[`layout${l.charAt(0).toUpperCase() + l.slice(1)}`]}</span>
-                              {writingConfig.layout === l && <div className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
-                            </div>
-                            <p className="text-[10px] opacity-60 leading-tight">
-                              {l === 'standard' && t.layoutStandardDesc}
-                              {l === 'web' && t.layoutWebDesc}
-                              {l === 'traditional' && t.layoutTraditionalDesc}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 relative overflow-hidden min-h-[200px] flex flex-col">
-                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500/20 to-transparent" />
-                        <div className="flex items-center gap-2 mb-4">
-                          <div className="w-2 h-2 rounded-full bg-zinc-700" />
-                          <div className="w-2 h-2 rounded-full bg-zinc-700" />
-                          <div className="w-2 h-2 rounded-full bg-zinc-700" />
-                        </div>
-                        
-                        <div className={cn(
-                          "flex-1 text-zinc-400 text-xs leading-relaxed transition-all duration-500",
-                          writingConfig.layout === 'web' ? "space-y-4" : "space-y-2",
-                          writingConfig.layout === 'traditional' ? "[&>p]:indent-[2em]" : ""
-                        )}>
-                          <p>
-                            {writingConfig.layout === 'web' 
-                              ? t.layoutPreviewP1
-                              : t.layoutPreviewP1Long}
-                          </p>
-                          <p>
-                            {writingConfig.layout === 'web'
-                              ? t.layoutPreviewP2
-                              : t.layoutPreviewP2Long}
-                          </p>
-                          {writingConfig.layout === 'web' && (
-                            <p>{t.layoutPreviewP3}</p>
-                          )}
-                          <p>
-                            {writingConfig.layout === 'web'
-                              ? t.layoutPreviewP4
-                              : t.layoutPreviewP4Long}
-                          </p>
-                        </div>
-
-                        <div className="mt-4 pt-4 border-t border-zinc-800/50 flex justify-between items-center opacity-40">
-                          <span className="text-[9px] font-mono">{t.style || "STYLE"}: {writingConfig.layout.toUpperCase()}</span>
-                          <span className="text-[9px] font-mono">{t.previewMode || "PREVIEW MODE"}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="pt-4">
-                    <div className="flex gap-4">
-                      <button
-                        onClick={handleResetSettings}
-                        className="flex-1 py-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 font-bold rounded-xl transition-all border border-zinc-700"
-                      >
-                        {t.resetSettings || "Reset All"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          try {
-                            localStorage.setItem("inkflow_ai_config", JSON.stringify(aiConfig));
-                            localStorage.setItem("inkflow_writing_config", JSON.stringify(writingConfig));
-                          setToast({ message: t.settingsSaved, type: 'success' });
-                        } catch (e) {
-                          setToast({ message: t.failedToSaveSettings, type: 'error' });
-                        }
-                        }}
-                        className="flex-[2] py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20"
-                      >
-                        {t.saveSettings}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            </motion.div>
+            <SettingsPage 
+              writingConfig={writingConfig}
+              setWritingConfig={setWritingConfig}
+              handleResetSettings={handleResetSettings}
+              aiConfig={aiConfig}
+              lang={lang}
+              setToast={setToast}
+              t={t}
+            />
           )}
         </AnimatePresence>
       </main>
       {/* Task Creation Modal */}
       <AnimatePresence>
         {showTaskModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl"
-            >
-              <h3 className="text-2xl font-bold text-white mb-6">{t.scheduleTask}</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-2">{t.taskType}</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button 
-                      onClick={() => setNewTask({ ...newTask, type: 'generate' })}
-                      className={cn(
-                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
-                        newTask.type === 'generate'
-                          ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400"
-                          : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600"
-                      )}
-                    >
-                      <Sparkles size={16} />
-                      {t.generateChapter}
-                    </button>
-                    <button 
-                      onClick={() => setNewTask({ ...newTask, type: 'publish' })}
-                      className={cn(
-                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
-                        newTask.type === 'publish'
-                          ? "bg-blue-500/10 border-blue-500/50 text-blue-400"
-                          : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600"
-                      )}
-                    >
-                      <Send size={16} />
-                      {t.mockPublish}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-2">{t.recurrence}</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button 
-                      onClick={() => setNewTask({ ...newTask, recurrence: 'once' })}
-                      className={cn(
-                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
-                        newTask.recurrence === 'once' || !newTask.recurrence
-                          ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400"
-                          : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600"
-                      )}
-                    >
-                      {t.recurrenceOnce}
-                    </button>
-                    <button 
-                      onClick={() => setNewTask({ ...newTask, recurrence: 'daily' })}
-                      className={cn(
-                        "py-3 px-4 rounded-xl border transition-all text-sm font-medium flex items-center justify-center gap-2",
-                        newTask.recurrence === 'daily'
-                          ? "bg-purple-500/10 border-purple-500/50 text-purple-400"
-                          : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600"
-                      )}
-                    >
-                      <RefreshCw size={16} />
-                      {t.recurrenceDaily}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-2">{t.novel}</label>
-                  <select 
-                    value={newTask.novel_id || ""}
-                    onChange={(e) => setNewTask({ ...newTask, novel_id: parseInt(e.target.value) })}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                  >
-                    <option value="">{t.selectNovel}</option>
-                    {novels.map(n => (
-                      <option key={n.id} value={n.id}>{n.title}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-zinc-400 mb-2">{t.scheduleTime}</label>
-                  <input 
-                    type="datetime-local"
-                    value={newTask.scheduled_at || ""}
-                    onChange={(e) => setNewTask({ ...newTask, scheduled_at: e.target.value })}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                  />
-                </div>
-
-                {newTask.type === 'generate' && (
-                  <div>
-                    <label className="block text-sm font-medium text-zinc-400 mb-2">{t.generateCount}</label>
-                    <input 
-                      type="number"
-                      min="1"
-                      max="50"
-                      value={newTask.count || 1}
-                      onChange={(e) => setNewTask({ ...newTask, count: parseInt(e.target.value) })}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-all"
-                    />
-                  </div>
-                )}
-
-                <div className="flex gap-4 mt-8">
-                  <button 
-                    onClick={() => setShowTaskModal(false)}
-                    className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-all"
-                  >
-                    {t.cancel}
-                  </button>
-                  <button 
-                    onClick={handleCreateTask}
-                    disabled={!newTask.novel_id || !newTask.scheduled_at}
-                    className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-black font-bold rounded-xl transition-all"
-                  >
-                    {t.confirm}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
+          <TaskModal 
+            newTask={newTask}
+            setNewTask={setNewTask}
+            novels={novels}
+            onClose={() => setShowTaskModal(false)}
+            onCreateTask={handleCreateTask}
+            t={t}
+          />
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {showPromptModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-2xl bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden"
-            >
-              <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-                <h3 className="text-xl font-bold text-white">
-                  {editingPrompt?.id ? t.editPrompt : t.addPrompt}
-                </h3>
-                <button 
-                  onClick={() => setShowPromptModal(false)}
-                  className="text-zinc-500 hover:text-white transition-colors"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-              
-              <div className="p-6 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">{t.promptName}</label>
-                    <input
-                      type="text"
-                      value={editingPrompt?.name || ""}
-                      onChange={(e) => setEditingPrompt(prev => ({ ...prev, name: e.target.value }))}
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-zinc-700"
-                      placeholder={t.promptNamePlaceholder}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">{t.promptType}</label>
-                    <div className="relative">
-                      <select
-                        value={editingPrompt?.type || "chapter"}
-                        onChange={(e) => setEditingPrompt(prev => ({ ...prev, type: e.target.value as any }))}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50 transition-all appearance-none"
-                      >
-                        <option value="chapter">{t.typeChapter}</option>
-                        <option value="outline">{t.typeOutline}</option>
-                        <option value="summary">{t.typeSummary}</option>
-                        <option value="description">{t.typeDescription}</option>
-                        <option value="refactor">{t.typeRefactor}</option>
-                        <option value="polish">{t.typePolish}</option>
-                      </select>
-                      <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between ml-1">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.promptContent}</label>
-                    <span className="text-[10px] text-zinc-700 font-mono">{t.supports}: {"{title}, {chapter_num}"}</span>
-                  </div>
-                  <textarea
-                    value={editingPrompt?.content || ""}
-                    onChange={(e) => setEditingPrompt(prev => ({ ...prev, content: e.target.value }))}
-                    className="w-full h-64 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-4 text-zinc-300 focus:outline-none focus:border-emerald-500/50 transition-all font-mono text-sm resize-none leading-relaxed"
-                    placeholder={t.promptContentPlaceholder || "Enter prompt content..."}
-                  />
-                </div>
-
-                <div className="flex items-center gap-3 p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-xl group cursor-pointer" onClick={() => setEditingPrompt(prev => ({ ...prev, is_default: prev?.is_default === 1 ? 0 : 1 }))}>
-                  <div className={cn(
-                    "w-5 h-5 rounded border flex items-center justify-center transition-all",
-                    editingPrompt?.is_default === 1 ? "bg-emerald-500 border-emerald-500 text-black" : "border-zinc-700 group-hover:border-zinc-500"
-                  )}>
-                    {editingPrompt?.is_default === 1 && <Zap size={12} fill="currentColor" />}
-                  </div>
-                  <span className="text-sm text-zinc-300 font-medium">
-                    {t.setAsDefault}
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-6 bg-zinc-800/30 border-t border-zinc-800 flex justify-end gap-3">
-                <button
-                  onClick={() => setShowPromptModal(false)}
-                  className="px-6 py-2 text-zinc-400 hover:text-white transition-colors"
-                >
-                  {t.cancel}
-                </button>
-                <button
-                  onClick={handleSavePrompt}
-                  className="px-8 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all"
-                >
-                  {t.confirm}
-                </button>
-              </div>
-            </motion.div>
-          </div>
+          <PromptModal 
+            editingPrompt={editingPrompt}
+            setEditingPrompt={setEditingPrompt}
+            onClose={() => setShowPromptModal(false)}
+            onSave={handleSavePrompt}
+            t={t}
+          />
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {isOutlinePreview && activeOutline && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-12">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsOutlinePreview(false)}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-5xl h-full max-h-[90vh] bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden"
-            >
-              <div className="p-6 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50 backdrop-blur-md">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400">
-                    <Eye size={20} />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-white">{t.previewOutline}</h3>
-                    <p className="text-xs text-zinc-500">{activeOutline.version_name}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setIsOutlinePreview(false)}
-                  className="w-10 h-10 rounded-full hover:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:text-white transition-colors"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-8 md:p-12 scrollbar-thin scrollbar-thumb-zinc-800">
-                <div className="markdown-body">
-                  <Markdown remarkPlugins={[remarkGfm]}>
-                    {activeOutline.content || ""}
-                  </Markdown>
-                </div>
-              </div>
-
-              <div className="p-6 bg-zinc-800/30 border-t border-zinc-800 flex justify-end">
-                <button
-                  onClick={() => setIsOutlinePreview(false)}
-                  className="px-8 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20"
-                >
-                  {t.confirm}
-                </button>
-              </div>
-            </motion.div>
-          </div>
+          <OutlinePreviewModal 
+            activeOutline={activeOutline}
+            onClose={() => setIsOutlinePreview(false)}
+            t={t}
+          />
         )}
       </AnimatePresence>
 
@@ -5016,81 +3488,16 @@ export default function App() {
 
       <AnimatePresence>
         {isHistoryOpen && currentChapter && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[80vh]"
-            >
-              <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-bold text-white">{t.history} - {currentChapter.title}</h3>
-                  <p className="text-sm text-zinc-500">{t.version} {t.history}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => saveChapterVersion(currentChapter.id)}
-                    disabled={isSavingVersion}
-                    className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-bold transition-all flex items-center gap-2"
-                  >
-                    {isSavingVersion ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                    {t.saveVersion}
-                  </button>
-                  <button 
-                    onClick={() => setIsHistoryOpen(false)}
-                    className="p-2 text-zinc-500 hover:text-white transition-colors"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-                {chapterVersions.length === 0 ? (
-                  <div className="text-center py-12 text-zinc-600">
-                    <History size={48} className="mx-auto mb-4 opacity-20" />
-                    <p>{t.noVersions}</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {chapterVersions.map((version) => (
-                      <div 
-                        key={version.id}
-                        className="p-4 bg-zinc-800/50 border border-zinc-800 rounded-xl hover:border-zinc-700 transition-all group"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-500">
-                              <Clock size={16} />
-                            </div>
-                            <div>
-                              <p className="text-sm font-bold text-zinc-200">
-                                {formatDate(version.created_at, 'yyyy-MM-dd HH:mm:ss')}
-                              </p>
-                              <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
-                                {version.content?.length || 0} {t.characters}
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => restoreChapterVersion(currentChapter.id, version.id)}
-                            disabled={isRestoringVersion}
-                            className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 rounded-lg text-xs font-bold transition-all opacity-0 group-hover:opacity-100"
-                          >
-                            {t.restore}
-                          </button>
-                        </div>
-                        <div className="text-xs text-zinc-500 line-clamp-2 italic">
-                          {version.content?.substring(0, 200)}...
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </div>
+          <HistoryModal 
+            currentChapter={currentChapter}
+            chapterVersions={chapterVersions}
+            isSavingVersion={isSavingVersion}
+            isRestoringVersion={isRestoringVersion}
+            onClose={() => setIsHistoryOpen(false)}
+            onSaveVersion={saveChapterVersion}
+            onRestoreVersion={restoreChapterVersion}
+            t={t}
+          />
         )}
       </AnimatePresence>
 
@@ -5106,25 +3513,3 @@ export default function App() {
     </div>
   );
 }
-
-const Toast = ({ message, type, onClose }: any) => (
-  <motion.div
-    initial={{ opacity: 0, y: 50 }}
-    animate={{ opacity: 1, y: 0 }}
-    exit={{ opacity: 0, y: 50 }}
-    className={cn(
-      "fixed bottom-12 left-1/2 -translate-x-1/2 z-[100] px-8 py-4 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex items-center gap-4 border backdrop-blur-xl",
-      type === 'success' 
-        ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" 
-        : "bg-rose-500/20 border-rose-500/40 text-rose-300"
-    )}
-  >
-    <div className={cn(
-      "w-8 h-8 rounded-full flex items-center justify-center",
-      type === 'success' ? "bg-emerald-500/20" : "bg-rose-500/20"
-    )}>
-      {type === 'success' ? <Sparkles size={20} /> : <X size={20} className="cursor-pointer" onClick={onClose} />}
-    </div>
-    <span className="text-base font-semibold tracking-wide">{message}</span>
-  </motion.div>
-);
