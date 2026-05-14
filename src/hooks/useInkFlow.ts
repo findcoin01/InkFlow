@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, Platform, ScheduledTask, Prompt, OperationLog, AIConfigDetail, TokenLog, Language } from "../types";
+import { Novel, Chapter, TokenStats, OutlineVersion, AIConfig, AIProvider, WritingConfig, Platform, ScheduledTask, Prompt, OperationLog, AIConfigDetail, TokenLog, Language, ChapterVersion } from "../types";
 import { translations } from "../constants";
 import { 
   generateChapterTitle, 
@@ -36,7 +36,7 @@ export function useInkFlow() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isPlotAssistantOpen, setIsPlotAssistantOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [chapterVersions, setChapterVersions] = useState<any[]>([]);
+  const [chapterVersions, setChapterVersions] = useState<ChapterVersion[]>([]);
   const [isSavingVersion, setIsSavingVersion] = useState(false);
   const [isRestoringVersion, setIsRestoringVersion] = useState(false);
   const lastSavedContentRef = useRef<string>("");
@@ -163,9 +163,10 @@ export function useInkFlow() {
       if (!res.ok) throw new Error(t.fetchError || "Failed to fetch novels");
       const data = await res.json();
       setNovels(data);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setToast({ message: e.message || "Failed to fetch novels", type: 'error' });
+      const errorMessage = e instanceof Error ? e.message : (t.fetchError || "Failed to fetch novels");
+      setToast({ message: errorMessage, type: 'error' });
     }
   };
 
@@ -176,9 +177,10 @@ export function useInkFlow() {
       const data = await res.json();
       setStats(data);
       await fetchTokenLogs(1);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setToast({ message: e.message || "Failed to fetch stats", type: 'error' });
+      const errorMessage = e instanceof Error ? e.message : (t.fetchError || "Failed to fetch stats");
+      setToast({ message: errorMessage, type: 'error' });
     }
   };
 
@@ -201,7 +203,7 @@ export function useInkFlow() {
       if (!res.ok) throw new Error(t.fetchError || "Failed to fetch tasks");
       const data = await res.json();
       setTasks(data);
-    } catch (e: any) { console.error(e); }
+    } catch (e: unknown) { console.error(e); }
   };
 
   const fetchPrompts = async () => {
@@ -230,7 +232,7 @@ export function useInkFlow() {
       if (res.ok) {
         const configs = await res.json();
         setAiConfigs(configs);
-        const active = configs.find((c: any) => c.is_active === 1);
+        const active = configs.find((c: AIConfigDetail) => c.is_active === 1);
         if (active) {
           setActiveProvider(active.provider);
           setAiConfig({
@@ -266,9 +268,10 @@ export function useInkFlow() {
       if (activeTab !== "editor" && activeTab !== "world") {
         setActiveTab("editor");
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setToast({ message: e.message || "Failed to fetch novel details", type: 'error' });
+      const errorMessage = e instanceof Error ? e.message : (t.fetchError || "Failed to fetch novel details");
+      setToast({ message: errorMessage, type: 'error' });
     }
   };
 
@@ -294,9 +297,10 @@ export function useInkFlow() {
       const updatedNovel = await response.json();
       setSelectedNovel(updatedNovel);
       setNovels(novels.map(n => n.id === updatedNovel.id ? updatedNovel : n));
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to save novel details:", error);
-      setToast({ message: error.message || "Failed to save novel details", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : (t.saveError || "Failed to save novel details");
+      setToast({ message: errorMessage, type: 'error' });
     }
   };
 
@@ -321,9 +325,10 @@ export function useInkFlow() {
       await fetchNovelDetails(data.id);
       setToast({ message: t.saveSettings || "Novel created successfully", type: 'success' });
       return data.id;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      setToast({ message: error.message || "Failed to create novel", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : (t.createError || "Failed to create novel");
+      setToast({ message: errorMessage, type: 'error' });
     } finally {
       setIsCreating(false);
     }
@@ -343,9 +348,10 @@ export function useInkFlow() {
       fetchNovels();
       fetchStats();
       setToast({ message: t.deleteNovel + " " + t.active, type: 'success' });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error deleting novel:", error);
-      setToast({ message: error.message || "Failed to delete novel", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : (t.deleteError || "Failed to delete novel");
+      setToast({ message: errorMessage, type: 'error' });
     }
   };
 
@@ -373,9 +379,10 @@ export function useInkFlow() {
       lastSavedContentRef.current = chapterToSave.content || "";
       setLastSavedAt(new Date());
       if (!isAuto) setToast({ message: t.saveSuccess || "Saved successfully", type: 'success' });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error saving chapter:", error);
-      if (!isAuto) setToast({ message: error.message || "Failed to save chapter", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : (t.saveError || "Failed to save chapter");
+      if (!isAuto) setToast({ message: errorMessage, type: 'error' });
     } finally { setIsSaving(false); }
   };
 
@@ -410,9 +417,10 @@ export function useInkFlow() {
       await fetchNovelDetails(selectedNovel.id);
       setToast({ message: t.chapters + " " + t.active, type: 'success' });
       return data.id;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      setToast({ message: error.message || "Failed to create chapter", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : (t.createError || "Failed to create chapter");
+      setToast({ message: errorMessage, type: 'error' });
     }
   };
 
@@ -425,9 +433,10 @@ export function useInkFlow() {
       if (currentChapter?.id === targetId) setCurrentChapter(null);
       if (selectedNovel) await fetchNovelDetails(selectedNovel.id);
       setToast({ message: t.deleteChapter + " " + t.active, type: 'success' });
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setToast({ message: e.message || "Failed to delete chapter", type: 'error' });
+      const errorMessage = e instanceof Error ? e.message : (t.deleteError || "Failed to delete chapter");
+      setToast({ message: errorMessage, type: 'error' });
     } finally { setChapterToDelete(null); }
   };
 
@@ -456,9 +465,10 @@ export function useInkFlow() {
       if (!res.ok) throw new Error(t.deleteError || "Failed to delete outline version");
       if (selectedNovel) await fetchNovelDetails(selectedNovel.id);
       setToast({ message: t.delete + " " + t.active, type: 'success' });
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setToast({ message: e.message || "Failed to delete outline version", type: 'error' });
+      const errorMessage = e instanceof Error ? e.message : (t.deleteError || "Failed to delete outline version");
+      setToast({ message: errorMessage, type: 'error' });
     } finally { setOutlineToDelete(null); }
   };
 
@@ -583,12 +593,13 @@ export function useInkFlow() {
       const promptTemplate = getActivePrompt('description');
       const { text: description, tokens } = await generateNovelDescription(activeOutline.content, aiConfig, lang, promptTemplate);
       if (description) {
-        handleSaveNovelDetails({ description, token_usage: tokens, token_type: 'description' } as any);
+        handleSaveNovelDetails({ description, token_usage: tokens, token_type: 'description' });
         setToast({ message: t.generateDescriptionLabel + " " + t.active, type: 'success' });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error generating description:", error);
-      setToast({ message: error.message || "Failed to generate description", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : "Failed to generate description";
+      setToast({ message: errorMessage, type: 'error' });
     } finally { setIsGenerating(false); }
   };
 
@@ -632,8 +643,8 @@ export function useInkFlow() {
       fetchStats();
       if (writingConfig.autoSummarize) handleGenerateSummary(finalContent);
       else await fetchNovelDetails(selectedNovel.id, currentChapter.id);
-    } catch (error: any) {
-      if (error.name !== 'AbortError') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name !== 'AbortError') {
         console.error(error);
         setToast({ message: error.message || "AI generation failed", type: 'error' });
       }
@@ -661,9 +672,10 @@ export function useInkFlow() {
         if (!res.ok) throw new Error(t.saveError || "Failed to save summary");
         setToast({ message: t.summarize + " " + t.active, type: 'success' });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error generating summary:", error);
-      setToast({ message: error.message || "Failed to generate summary", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : "Failed to generate summary";
+      setToast({ message: errorMessage, type: 'error' });
     } finally { setIsGenerating(false); }
   };
 
@@ -708,9 +720,9 @@ export function useInkFlow() {
       setNewTask({ type: 'generate', count: 1 });
       await fetchTasks();
       setToast({ message: t.taskCreated || "Task created", type: 'success' });
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setToast({ message: e.message || "Failed to create task", type: 'error' });
+      setToast({ message: e instanceof Error ? e.message : (t.createError || "Failed to create task"), type: 'error' });
     }
   };
 
@@ -813,11 +825,12 @@ export function useInkFlow() {
       const promptTemplate = getActivePrompt('refactor');
       const { text: refactored, tokens } = await refactorWorldSetting(selectedNovel.world_setting, aiConfig, lang, promptTemplate);
       if (refactored) {
-        await handleSaveNovelDetails({ world_setting: refactored, token_usage: tokens, token_type: 'refactor' } as any);
+        await handleSaveNovelDetails({ world_setting: refactored, token_usage: tokens, token_type: 'refactor' });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error refactoring world setting:", error);
-      setToast({ message: error.message || "Failed to refactor world setting", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : "Failed to refactor world setting";
+      setToast({ message: errorMessage, type: 'error' });
     } finally { setIsRefactoringWorld(false); }
   };
 
@@ -827,11 +840,12 @@ export function useInkFlow() {
     try {
       const result = await extractNovelMetadata(chapters, { characters: selectedNovel.characters || "", storylines: selectedNovel.storylines || "", world_setting: selectedNovel.world_setting || "", relationships: selectedNovel.relationships || "" }, aiConfig, lang);
       if (result && result.data) {
-        await handleSaveNovelDetails({ ...result.data, last_supplement_at: new Date().toISOString(), token_usage: result.usage?.total_tokens || 0, token_type: 'supplement' } as any);
+        await handleSaveNovelDetails({ ...result.data, last_supplement_at: new Date().toISOString(), token_usage: result.usage?.total_tokens || 0, token_type: 'supplement' });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to supplement novel metadata:", error);
-      setToast({ message: error.message || "Failed to update novel metadata", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : "Failed to update novel metadata";
+      setToast({ message: errorMessage, type: 'error' });
     } finally { setIsSupplementing(false); }
   };
 
@@ -880,8 +894,8 @@ export function useInkFlow() {
       fetchStats();
       if (writingConfig.autoSummarize) handleGenerateSummary(currentContent);
       else await fetchNovelDetails(selectedNovel.id, currentChapter.id);
-    } catch (error: any) {
-      if (error.name !== 'AbortError') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name !== 'AbortError') {
         console.error("Segmented Write Error:", error);
         setToast({ message: error.message || "Segmented writing failed", type: 'error' });
       }
@@ -907,9 +921,10 @@ export function useInkFlow() {
         await fetchNovelDetails(selectedNovel.id);
         setToast({ message: t.generateOutline + " " + t.active, type: 'success' });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      setToast({ message: error.message || "Failed to generate outline", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : "Failed to generate outline";
+      setToast({ message: errorMessage, type: 'error' });
     } finally { setIsGeneratingOutline(false); }
   };
 
@@ -946,9 +961,10 @@ export function useInkFlow() {
       }
       await fetchNovelDetails(selectedNovel.id);
       setToast({ message: t.batchGenerateSuccess || "Batch generate success", type: 'success' });
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setToast({ message: e.message || "Batch generation failed", type: 'error' });
+      const errorMessage = e instanceof Error ? e.message : "Batch generation failed";
+      setToast({ message: errorMessage, type: 'error' });
     } finally {
       setIsBatchGenerating(false);
       setShowBatchModal(false);
@@ -982,8 +998,8 @@ export function useInkFlow() {
       fetchStats();
       await fetchNovelDetails(selectedNovel.id, currentChapter.id);
       setToast({ message: t.polishing + " " + t.completed, type: 'success' });
-    } catch (error: any) {
-      if (error.name !== 'AbortError') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name !== 'AbortError') {
         console.error(error);
         setToast({ message: error.message || "Polishing failed", type: 'error' });
       }
@@ -1004,9 +1020,10 @@ export function useInkFlow() {
       if (!res.ok) throw new Error(t.saveError || "Failed to save outline");
       fetchNovelDetails(selectedNovel.id);
       setToast({ message: t.saveSettings || "Outline saved", type: 'success' });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      setToast({ message: error.message || "Failed to save outline", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : "Failed to save outline";
+      setToast({ message: errorMessage, type: 'error' });
     }
   };
 
@@ -1023,9 +1040,10 @@ export function useInkFlow() {
       setToast({ message: t.newVersion + " " + t.active, type: 'success' });
       setIsCreatingOutlineVersion(false);
       setNewOutlineVersionName("");
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      setToast({ message: error.message || "Failed to create outline version", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : "Failed to create outline version";
+      setToast({ message: errorMessage, type: 'error' });
     }
   };
 
@@ -1036,13 +1054,14 @@ export function useInkFlow() {
       if (!res.ok) throw new Error(t.saveError || "Failed to activate outline");
       fetchNovelDetails(selectedNovel.id);
       setToast({ message: t.activate + " " + t.active, type: 'success' });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      setToast({ message: error.message || "Failed to activate outline", type: 'error' });
+      const errorMessage = error instanceof Error ? error.message : "Failed to activate outline";
+      setToast({ message: errorMessage, type: 'error' });
     }
   };
 
-  const handleSaveAIConfig = async (config: any) => {
+  const handleSaveAIConfig = async (config: AIConfigDetail) => {
     try {
       const res = await fetch("/api/ai-configs", {
         method: "POST",
@@ -1054,7 +1073,7 @@ export function useInkFlow() {
         await fetchAIConfigs();
         setAiConfig({ provider: config.provider, model: config.model, apiKey: config.api_key, baseUrl: config.base_url, parameters: config.parameters });
       }
-    } catch (e) { setToast({ message: t.saveError, type: 'error' }); }
+    } catch (e: unknown) { setToast({ message: t.saveError || "Failed to save AI config", type: 'error' }); }
   };
 
   const handleRunTask = async (id: number) => {
@@ -1063,9 +1082,10 @@ export function useInkFlow() {
       if (!res.ok) throw new Error("Failed to run task");
       setToast({ message: t.taskStarted, type: 'success' });
       await fetchTasks();
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setToast({ message: e.message || "Failed to run task", type: 'error' });
+      const errorMessage = e instanceof Error ? e.message : "Failed to run task";
+      setToast({ message: errorMessage, type: 'error' });
     }
   };
 
@@ -1077,9 +1097,10 @@ export function useInkFlow() {
       if (!res.ok) throw new Error(t.deleteError || "Failed to delete task");
       await fetchTasks();
       setToast({ message: t.taskDeleted || "Task deleted", type: 'success' });
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setToast({ message: e.message || "Failed to delete task", type: 'error' });
+      const errorMessage = e instanceof Error ? e.message : "Failed to delete task";
+      setToast({ message: errorMessage, type: 'error' });
     }
   };
 
@@ -1091,9 +1112,10 @@ export function useInkFlow() {
       if (!res.ok) throw new Error(t.deleteError || "Failed to delete prompt");
       await fetchPrompts();
       setToast({ message: t.delete + " " + t.active, type: 'success' });
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setToast({ message: e.message || "Failed to delete prompt", type: 'error' });
+      const errorMessage = e instanceof Error ? e.message : "Failed to delete prompt";
+      setToast({ message: errorMessage, type: 'error' });
     } finally { setPromptToDelete(null); }
   };
 
@@ -1111,7 +1133,7 @@ export function useInkFlow() {
     } catch (e) { console.error(e); }
   };
 
-  const handleTestConnection = async (config: any) => {
+  const handleTestConnection = async (config: AIConfigDetail) => {
     setIsTesting(true);
     setTestResult(null);
     try {
@@ -1122,7 +1144,10 @@ export function useInkFlow() {
       });
       const data = await res.json();
       setTestResult({ success: data.success, message: data.success ? data.message : data.error });
-    } catch (e: any) { setTestResult({ success: false, message: e.message }); }
+    } catch (e: unknown) { 
+      const errorMessage = e instanceof Error ? e.message : "Failed to test connection";
+      setTestResult({ success: false, message: errorMessage }); 
+    }
     finally { setIsTesting(false); }
   };
 
@@ -1142,7 +1167,7 @@ export function useInkFlow() {
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        handleSaveNovelDetails({ cover_url: reader.result as string } as any);
+        handleSaveNovelDetails({ cover_url: reader.result as string });
       };
       reader.readAsDataURL(file);
     }

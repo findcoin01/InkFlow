@@ -37,7 +37,7 @@ interface WorldBuildingPageProps {
   prompts: Prompt[];
   selectedTemplates: Record<string, number>;
   setSelectedTemplates: React.Dispatch<React.SetStateAction<Record<string, number>>>;
-  handleDeletePrompt: (id: number) => void;
+  onDeletePromptClick: (e: React.MouseEvent, id: number) => void;
   t: any;
 }
 
@@ -57,7 +57,7 @@ const WorldBuildingPage: React.FC<WorldBuildingPageProps> = ({
   prompts,
   selectedTemplates,
   setSelectedTemplates,
-  handleDeletePrompt,
+  onDeletePromptClick,
   t
 }) => {
   return (
@@ -278,7 +278,7 @@ const WorldBuildingPage: React.FC<WorldBuildingPageProps> = ({
                     prompts={prompts}
                     selectedId={selectedTemplates['refactor']}
                     onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, refactor: id }))}
-                    onDelete={handleDeletePrompt}
+                    onDelete={(id) => onDeletePromptClick({ stopPropagation: () => {} } as React.MouseEvent, id)}
                     t={t}
                   />
                   <button 

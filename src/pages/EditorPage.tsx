@@ -23,14 +23,19 @@ import TemplateSelector from "../components/ui/TemplateSelector";
 import StructuredContent from "../components/ui/StructuredContent";
 
 interface EditorPageProps {
+  chapters: Chapter[];
+  chapterSearch: string;
+  setChapterSearch: (val: string) => void;
   currentChapter: Chapter | null;
+  setCurrentChapter: (ch: Chapter | null) => void;
+  handleCreateChapter: () => void;
+  onDeleteChapterClick: (e: React.MouseEvent, id: number) => void;
   isMarkdownPreview: boolean;
   contentSearch: string;
   setContentSearch: (val: string) => void;
   setLastSearchIndex: (val: number) => void;
   handleSearchContent: () => void;
   textareaRef: React.RefObject<HTMLTextAreaElement>;
-  setCurrentChapter: (ch: Chapter | null) => void;
   isGenerating: boolean;
   isSegmenting: boolean;
   abortController: AbortController | null;
@@ -38,7 +43,7 @@ interface EditorPageProps {
   prompts: Prompt[];
   selectedTemplates: Record<string, number>;
   setSelectedTemplates: React.Dispatch<React.SetStateAction<Record<string, number>>>;
-  handleDeletePrompt: (id: number) => void;
+  onDeletePromptClick: (e: React.MouseEvent, id: number) => void;
   isPolishing: boolean;
   handleRefactorChapter: () => void;
   handleGenerateSummary: (content?: string) => void;
@@ -56,7 +61,7 @@ interface EditorPageProps {
   newOutlineVersionName: string;
   setNewOutlineVersionName: (val: string) => void;
   handleCreateOutlineVersion: () => void;
-  handleDeleteOutlineVersion: (id: number) => void;
+  onDeleteOutlineClick: (e: React.MouseEvent, id: number) => void;
   handleActivateOutline: (id: number) => void;
   isOutlinePreview: boolean;
   setIsOutlinePreview: (val: boolean) => void;
@@ -66,14 +71,19 @@ interface EditorPageProps {
 }
 
 const EditorPage: React.FC<EditorPageProps> = ({
+  chapters,
+  chapterSearch,
+  setChapterSearch,
   currentChapter,
+  setCurrentChapter,
+  handleCreateChapter,
+  onDeleteChapterClick,
   isMarkdownPreview,
   contentSearch,
   setContentSearch,
   setLastSearchIndex,
   handleSearchContent,
   textareaRef,
-  setCurrentChapter,
   isGenerating,
   isSegmenting,
   abortController,
@@ -81,7 +91,7 @@ const EditorPage: React.FC<EditorPageProps> = ({
   prompts,
   selectedTemplates,
   setSelectedTemplates,
-  handleDeletePrompt,
+  onDeletePromptClick,
   isPolishing,
   handleRefactorChapter,
   handleGenerateSummary,
@@ -99,7 +109,7 @@ const EditorPage: React.FC<EditorPageProps> = ({
   newOutlineVersionName,
   setNewOutlineVersionName,
   handleCreateOutlineVersion,
-  handleDeleteOutlineVersion,
+  onDeleteOutlineClick,
   handleActivateOutline,
   isOutlinePreview,
   setIsOutlinePreview,
@@ -108,9 +118,67 @@ const EditorPage: React.FC<EditorPageProps> = ({
   t
 }) => {
   return (
-    <div className="flex-1 flex gap-6 overflow-hidden">
+    <div className="flex-1 flex gap-6 min-h-0 overflow-hidden">
+      {/* Chapter List Overlay or Sidebar */}
+      <div className="w-64 flex flex-col gap-4">
+        <Card className="flex-1 flex flex-col p-4 overflow-hidden" title={t.chapters}>
+          <div className="relative mb-4">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input 
+              type="text"
+              value={chapterSearch}
+              onChange={(e) => setChapterSearch(e.target.value)}
+              placeholder={t.searchChapters || "Search chapters..."}
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2 pl-9 pr-3 text-xs text-zinc-300 focus:outline-none focus:border-emerald-500/30 transition-all"
+            />
+          </div>
+          
+          <div className="flex-1 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+            {chapters
+              .filter(ch => ch.title.toLowerCase().includes(chapterSearch.toLowerCase()))
+              .map((ch) => (
+              <button
+                key={ch.id}
+                onClick={() => setCurrentChapter(ch)}
+                className={cn(
+                  "w-full text-left p-3 rounded-xl transition-all group/chapter relative",
+                  currentChapter?.id === ch.id 
+                    ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400" 
+                    : "hover:bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 border border-transparent"
+                )}
+              >
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs font-bold truncate pr-6">{ch.title}</span>
+                  <div className="flex items-center gap-2 opacity-60">
+                    <span className="text-[10px] font-mono tracking-tighter uppercase">{formatDate(ch.created_at, "MM-dd")}</span>
+                    <span className="text-[10px] font-bold">·</span>
+                    <span className="text-[10px] font-mono">{ch.word_count || 0} {t.words}</span>
+                  </div>
+                </div>
+                
+                <button
+                  onClick={(e) => onDeleteChapterClick(e, ch.id)}
+                  className="absolute top-1/2 -translate-y-1/2 right-2 p-1.5 text-zinc-600 hover:text-rose-500 hover:bg-rose-500/10 rounded-md opacity-0 group/chapter:opacity-100 transition-all"
+                  title={t.deleteChapter}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </button>
+            ))}
+          </div>
+
+          <button 
+            onClick={handleCreateChapter}
+            className="mt-4 w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20 active:scale-95 flex items-center justify-center gap-2"
+          >
+            <Plus size={16} />
+            {t.newChapter}
+          </button>
+        </Card>
+      </div>
+
       {/* Editor Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {currentChapter ? (
           <>
             <Card className="flex-1 flex flex-col overflow-hidden bg-zinc-950/50 border-zinc-800/50 group/editor relative">
@@ -175,7 +243,7 @@ const EditorPage: React.FC<EditorPageProps> = ({
                       prompts={prompts}
                       selectedId={selectedTemplates['chapter']}
                       onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, chapter: id }))}
-                      onDelete={handleDeletePrompt}
+                      onDelete={(id) => onDeletePromptClick({ stopPropagation: () => {} } as React.MouseEvent, id)}
                       t={t}
                     />
                   </div>
@@ -201,7 +269,7 @@ const EditorPage: React.FC<EditorPageProps> = ({
                       prompts={prompts}
                       selectedId={selectedTemplates['polish']}
                       onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, polish: id }))}
-                      onDelete={handleDeletePrompt}
+                      onDelete={(id) => onDeletePromptClick({ stopPropagation: () => {} } as React.MouseEvent, id)}
                       t={t}
                     />
                   </div>
@@ -222,7 +290,7 @@ const EditorPage: React.FC<EditorPageProps> = ({
                       prompts={prompts}
                       selectedId={selectedTemplates['summary']}
                       onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, summary: id }))}
-                      onDelete={handleDeletePrompt}
+                      onDelete={(id) => onDeletePromptClick({ stopPropagation: () => {} } as React.MouseEvent, id)}
                       t={t}
                     />
                   </div>
@@ -350,7 +418,7 @@ const EditorPage: React.FC<EditorPageProps> = ({
                     <div className="flex gap-1">
                       {activeOutline && (
                         <button 
-                          onClick={() => handleDeleteOutlineVersion(activeOutline.id)}
+                          onClick={(e) => onDeleteOutlineClick(e, activeOutline.id)}
                           className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-rose-400 transition-colors"
                           title={t.delete}
                         >
@@ -375,7 +443,7 @@ const EditorPage: React.FC<EditorPageProps> = ({
                         prompts={prompts}
                         selectedId={selectedTemplates['outline']}
                         onSelect={(id) => setSelectedTemplates(prev => ({ ...prev, outline: id }))}
-                        onDelete={handleDeletePrompt}
+                        onDelete={(id) => onDeletePromptClick({ stopPropagation: () => {} } as React.MouseEvent, id)}
                         t={t}
                       />
                       <button 
