@@ -85,7 +85,28 @@ export function useInkFlow() {
 
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
+
+  // Auto-save logic
+  useEffect(() => {
+    if (!currentChapter || isGenerating || isWriting || isSegmenting || isBatchGenerating) return;
+    
+    // Only auto-save if content has changed
+    if (currentChapter.content === lastSavedContentRef.current) return;
+
+    const timer = setTimeout(() => {
+      handleSaveChapter(true);
+    }, 10000); // Auto-save after 10 seconds of inactivity
+
+    return () => clearTimeout(timer);
+  }, [currentChapter?.content, currentChapter?.title, currentChapter?.summary]);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
     const saved = localStorage.getItem("inkflow_ai_config");
@@ -308,11 +329,13 @@ export function useInkFlow() {
     }
   };
 
-  const handleDeleteNovel = async (id: number) => {
+  const handleDeleteNovel = async (id?: number) => {
+    const targetId = id || novelToDelete;
+    if (!targetId) return;
     try {
-      const res = await fetch(`/api/novels/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/novels/${targetId}`, { method: "DELETE" });
       if (!res.ok) throw new Error(t.deleteError || "Failed to delete novel");
-      if (selectedNovel?.id === id) {
+      if (selectedNovel?.id === targetId) {
         setSelectedNovel(null);
         setActiveTab("novels");
       }
@@ -393,17 +416,50 @@ export function useInkFlow() {
     }
   };
 
-  const handleDeleteChapter = async (chapterId: number) => {
+  const handleDeleteChapter = async (chapterId?: number) => {
+    const targetId = chapterId || chapterToDelete;
+    if (!targetId) return;
     try {
-      const res = await fetch(`/api/chapters/${chapterId}`, { method: "DELETE" });
+      const res = await fetch(`/api/chapters/${targetId}`, { method: "DELETE" });
       if (!res.ok) throw new Error(t.deleteError || "Failed to delete chapter");
-      if (currentChapter?.id === chapterId) setCurrentChapter(null);
+      if (currentChapter?.id === targetId) setCurrentChapter(null);
       if (selectedNovel) await fetchNovelDetails(selectedNovel.id);
       setToast({ message: t.deleteChapter + " " + t.active, type: 'success' });
     } catch (e: any) {
       console.error(e);
       setToast({ message: e.message || "Failed to delete chapter", type: 'error' });
     } finally { setChapterToDelete(null); }
+  };
+
+  const onDeleteNovelClick = (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    setNovelToDelete(id);
+  };
+  const onDeleteChapterClick = (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    setChapterToDelete(id);
+  };
+  const onDeleteOutlineClick = (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    setOutlineToDelete(id);
+  };
+  const onDeletePromptClick = (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    setPromptToDelete(id);
+  };
+
+  const handleDeleteOutlineVersion = async (id?: number) => {
+    const targetId = id || outlineToDelete;
+    if (!targetId) return;
+    try {
+      const res = await fetch(`/api/outlines/${targetId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(t.deleteError || "Failed to delete outline version");
+      if (selectedNovel) await fetchNovelDetails(selectedNovel.id);
+      setToast({ message: t.delete + " " + t.active, type: 'success' });
+    } catch (e: any) {
+      console.error(e);
+      setToast({ message: e.message || "Failed to delete outline version", type: 'error' });
+    } finally { setOutlineToDelete(null); }
   };
 
   const getChapterTitleFromOutline = (outlineContent: string, chapterNum: number) => {
@@ -986,20 +1042,6 @@ export function useInkFlow() {
     }
   };
 
-  const handleDeleteOutlineVersion = async (id: number) => {
-    if (!selectedNovel) return;
-    try {
-      const res = await fetch(`/api/outlines/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(t.deleteError || "Failed to delete outline version");
-      fetchNovelDetails(selectedNovel.id);
-      setToast({ message: t.deleteSuccess || "Deleted successfully", type: 'success' });
-      setOutlineToDelete(null);
-    } catch (error: any) {
-      console.error(error);
-      setToast({ message: error.message || "Failed to delete outline version", type: 'error' });
-    }
-  };
-
   const handleSaveAIConfig = async (config: any) => {
     try {
       const res = await fetch("/api/ai-configs", {
@@ -1027,9 +1069,11 @@ export function useInkFlow() {
     }
   };
 
-  const handleDeleteTask = async (id: number) => {
+  const handleDeleteTask = async (id?: number) => {
+    const targetId = id; // Task deletion usually doesn't have a confirm modal in this app yet, or it's handled differently
+    if (!targetId) return;
     try {
-      const res = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/tasks/${targetId}`, { method: "DELETE" });
       if (!res.ok) throw new Error(t.deleteError || "Failed to delete task");
       await fetchTasks();
       setToast({ message: t.taskDeleted || "Task deleted", type: 'success' });
@@ -1039,20 +1083,18 @@ export function useInkFlow() {
     }
   };
 
-  const handleDeletePrompt = async (id: number) => {
+  const handleDeletePrompt = async (id?: number) => {
+    const targetId = id || promptToDelete;
+    if (!targetId) return;
     try {
-      const res = await fetch(`/api/prompts/${id}`, { method: "DELETE" });
-      if (res.ok) {
-        await fetchPrompts();
-        setSelectedTemplates(prev => {
-          const next = { ...prev };
-          Object.keys(next).forEach(key => { if (next[key] === id) delete next[key]; });
-          return next;
-        });
-        setToast({ message: t.promptDeleted || "模板已删除", type: 'success' });
-      }
-    } catch (e) { console.error(e); }
-    finally { setPromptToDelete(null); }
+      const res = await fetch(`/api/prompts/${targetId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(t.deleteError || "Failed to delete prompt");
+      await fetchPrompts();
+      setToast({ message: t.delete + " " + t.active, type: 'success' });
+    } catch (e: any) {
+      console.error(e);
+      setToast({ message: e.message || "Failed to delete prompt", type: 'error' });
+    } finally { setPromptToDelete(null); }
   };
 
   const handleActivatePrompt = async (id: number) => {
@@ -1095,6 +1137,21 @@ export function useInkFlow() {
     setShowResetConfirm(false);
   };
 
+  const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        handleSaveNovelDetails({ cover_url: reader.result as string } as any);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const toggleEditMode = (section: string) => {
+    setEditMode(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
   return {
     fetchNovels, fetchStats, fetchTokenLogs, fetchTasks, fetchPrompts, fetchLogs, fetchAIConfigs, fetchNovelDetails,
     handleSaveNovelDetails, handleCreateNovel, handleDeleteNovel, handleSaveChapter, handleAddChapter, handleDeleteChapter,
@@ -1104,6 +1161,7 @@ export function useInkFlow() {
     handleRefactorChapterContent: handleRefactorChapterStream,
     handleSaveOutline, handleCreateOutlineVersion, handleActivateOutline, handleDeleteOutlineVersion,
     handleSaveAIConfig, handleRunTask, handleDeleteTask, handleDeletePrompt, handleActivatePrompt, handleTestConnection, handleResetSettings,
+    handleCoverUpload, toggleEditMode, onDeleteNovelClick, onDeleteChapterClick, onDeleteOutlineClick, onDeletePromptClick,
 
     isSidebarCollapsed, setIsSidebarCollapsed, novelSearch, setNovelSearch, chapterSearch, setChapterSearch, contentSearch, setContentSearch, lastSearchIndex, setLastSearchIndex,
     prompts, setPrompts, promptFilter, setPromptFilter, selectedTemplates, setSelectedTemplates, logs, setLogs, logPage, setLogPage, logTotalPages, setLogTotalPages,
